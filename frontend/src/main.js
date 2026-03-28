@@ -12,17 +12,36 @@ const routes = {
   '/favorites': 'favorites',
   '/mypage': 'mypage',
   '/login': 'login',
+  '/register': 'register',
   '/profile-edit': 'profile-edit',
   '/detail': 'detail',
   '/review-history': 'review-history',
   '/visit-history': 'visit-history',
   '/search-history': 'search-history',
   '/theme': 'theme',
+  '/admin': 'admin',
 };
 
 // Simple auth state
 let isLoggedIn = false;
 let currentUser = { name: '', email: '' };
+
+function saveAuth() {
+  localStorage.setItem('izakaya_auth', JSON.stringify({ isLoggedIn, currentUser }));
+}
+
+function loadAuth() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('izakaya_auth') || 'null');
+    if (saved && saved.isLoggedIn) {
+      isLoggedIn = true;
+      currentUser = saved.currentUser;
+      loadUserData();
+    }
+  } catch(e) { console.error('loadAuth error', e); }
+}
+
+loadAuth();
 
 // ============================================================
 // Data Storage
@@ -150,6 +169,9 @@ function navigateTo(hash) {
   if (pageId === 'theme') {
     setTimeout(() => renderThemeSettings(), 50);
   }
+  if (pageId === 'admin') {
+    setTimeout(() => renderAdminStats(), 50);
+  }
 
   // Hide all pages
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -219,25 +241,21 @@ const FALLBACK_GENRES = [
 ];
 
 const FALLBACK_BUDGETS = [
-  { code: 'B009', name: '1,000円' },
-  { code: 'B010', name: '2,000円' },
-  { code: 'B011', name: '3,000円' },
-  { code: 'B001', name: '4,000円' },
-  { code: 'B002', name: '5,000円' },
-  { code: 'B003', name: '7,000円' },
-  { code: 'B008', name: '10,000円' },
-  { code: 'B004', name: '20,000円' },
-  { code: 'B005', name: '30,000円' },
+  { code: 'B010', name: '1,000円' },
+  { code: 'B001', name: '2,000円' },
+  { code: 'B002', name: '3,000円' },
+  { code: 'B003', name: '4,000円' },
+  { code: 'B008', name: '5,000円' },
+  { code: 'B004', name: '7,000円' },
+  { code: 'B005', name: '10,000円' },
+  { code: 'B012', name: '20,000円' },
+  { code: 'B013', name: '30,000円' },
 ];
 
 // Allowed budget upper-limit values (in yen) matching HotPepper API ranges
-// API ranges: ~500, 501~1000, 1001~1500, 1501~2000, 2001~3000, 3001~4000,
-//             4001~5000, 5001~7000, 7001~10000, 10001~15000, 15001~20000,
-//             20001~30000, 30001~
-// We only keep 1000円 increment ranges, 10000円+ in 10000 increments, max 30000
 const ALLOWED_BUDGET_VALUES = [
-  1000, 2000, 3000, 4000, 5000, 7000,
-  10000, 20000, 30000
+  500, 1000, 1500, 2000, 3000, 4000, 5000, 7000,
+  10000, 15000, 20000, 30000
 ];
 
 // ============================================================
@@ -275,6 +293,22 @@ setInterval(nextSlide, 5000);
 // ============================================================
 async function init() {
   initThreeBackground();
+
+  // Verify session with server on startup
+  try {
+    const res = await fetch('/api/restaurants/me/', { credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      isLoggedIn = true;
+      currentUser = { name: data.display_name || data.username, email: data.email };
+      saveAuth();
+    }
+  } catch(e) { console.warn('Session check failed', e); }
+
+  loadAuth();
+  updateAuthUI();
+  updateProfileDisplay();
+
   navigateTo(location.hash || '#/');
   await Promise.all([fetchGenres(), fetchBudgets()]);
   setupLocationToggle();
@@ -290,17 +324,81 @@ async function init() {
   // Login form
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
-    loginForm.addEventListener('submit', (e) => {
+    loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const emailInput = document.getElementById('login-email');
+      const passwordInput = document.getElementById('login-password');
       const email = emailInput ? emailInput.value : '';
-      const userName = email ? email.split('@')[0] : 'ユーザー';
-      isLoggedIn = true;
-      currentUser = { name: userName, email: email };
-      loadUserData();
-      updateProfileDisplay();
-      updateAuthUI();
-      location.hash = '#/';
+      const password = passwordInput ? passwordInput.value : '';
+
+      try {
+        const res = await fetch('/api/restaurants/auth/login/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+          credentials: 'include'
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          isLoggedIn = true;
+          currentUser = { name: data.display_name || data.username, email: data.email };
+          saveAuth();
+          loadUserData();
+          updateProfileDisplay();
+          updateAuthUI();
+          location.hash = '#/';
+        } else {
+          if (data.error === 'user_not_found') {
+            alert(data.message);
+            location.hash = '#/register';
+          } else {
+            alert(data.message || 'ログインに失敗しました');
+          }
+        }
+      } catch (err) {
+        console.error('Login error:', err);
+        alert('通信エラーが発生しました');
+      }
+    });
+  }
+
+  // Register form
+  const registerForm = document.getElementById('register-form');
+  if (registerForm) {
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nameInput = document.getElementById('register-name');
+      const emailInput = document.getElementById('register-email');
+      const passwordInput = document.getElementById('register-password');
+      const display_name = nameInput ? nameInput.value : '';
+      const email = emailInput ? emailInput.value : '';
+      const password = passwordInput ? passwordInput.value : '';
+
+      try {
+        const res = await fetch('/api/restaurants/auth/register/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, display_name }),
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (res.ok) {
+          isLoggedIn = true;
+          currentUser = { name: data.display_name || data.username, email: data.email };
+          saveAuth();
+          loadUserData();
+          updateProfileDisplay();
+          updateAuthUI();
+          alert('登録が完了しました！');
+          location.hash = '#/';
+        } else {
+          alert(data.error || '登録に失敗しました');
+        }
+      } catch (err) {
+        console.error('Register error:', err);
+        alert('通信エラーが発生しました');
+      }
     });
   }
 
@@ -314,6 +412,7 @@ async function init() {
       const userName = googleEmail.split('@')[0];
       isLoggedIn = true;
       currentUser = { name: userName, email: googleEmail };
+      saveAuth();
       loadUserData();
       updateProfileDisplay();
       updateAuthUI();
@@ -338,6 +437,8 @@ async function init() {
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
       isLoggedIn = false;
+      currentUser = { name: '', email: '' };
+      saveAuth();
       clearUserData();
       updateAuthUI();
       location.hash = '#/login';
@@ -413,8 +514,18 @@ function setupLocationToggle() {
 // ============================================================
 function updateAuthUI() {
   const currentHash = location.hash || '#/';
-  if (currentHash === '#/favorites' || currentHash === '#/mypage') {
+  if (currentHash === '#/favorites' || currentHash === '#/mypage' || currentHash === '#/admin') {
     navigateTo(currentHash);
+  }
+
+  // Show/Hide admin nav
+  const adminNav = document.getElementById('admin-nav');
+  if (adminNav) {
+    if (isLoggedIn && currentUser.email === 'test@gmail.com') {
+      adminNav.classList.remove('hidden');
+    } else {
+      adminNav.classList.add('hidden');
+    }
   }
 }
 
@@ -598,7 +709,9 @@ searchForm.addEventListener('submit', async (e) => {
   const freeFood = formData.get('free_food');
 
   // Build params based on location mode
-  let params;
+  let targetUrl = '/api/restaurants/search/';
+  let searchParams;
+
   if (state.locationMode === 'station') {
     const stationInput = document.getElementById('station-input');
     const stationName = stationInput ? stationInput.value.trim() : '';
@@ -609,29 +722,49 @@ searchForm.addEventListener('submit', async (e) => {
       loaderSearch.classList.add('hidden');
       return;
     }
-    params = new URLSearchParams({ keyword: stationName, range: 3 });
+    searchParams = new URLSearchParams({ keyword: stationName, range: 3 });
   } else {
     if (!state.isLocationReady) return;
-    params = new URLSearchParams({ lat: state.lat, lng: state.lng, range: 3 });
+    searchParams = new URLSearchParams({ lat: state.lat, lng: state.lng, range: 3 });
   }
 
-  if (genre) params.append('genre', genre);
-  if (budgetMax) params.append('budget', budgetMax);
-  else if (budgetMin) params.append('budget', budgetMin);
-  if (keyword) {
-    const existing = params.get('keyword');
-    if (existing && state.locationMode === 'station') {
-      params.set('keyword', existing + ' ' + keyword);
-    } else {
-      params.append('keyword', keyword);
-    }
+  // Add filters
+  if (genre) searchParams.append('genre', genre);
+  if (budgetMin) searchParams.append('budget_min', budgetMin);
+  if (budgetMax) searchParams.append('budget_max', budgetMax);
+  if (people) searchParams.append('people', people);
+  if (freeDrink) searchParams.append('free_drink', 'true');
+  if (freeFood) searchParams.append('free_food', 'true');
+
+  let fetchOptions = { method: 'GET' };
+
+  // If keyword is present, use AI search (Gemini)
+  if (keyword && keyword.trim() !== '') {
+    targetUrl = '/api/restaurants/natural-search/';
+    const aiQuery = keyword.trim();
+    const body = {
+      query: aiQuery,
+      lat: state.lat,
+      lng: state.lng,
+      // 既存のフィルタをコンテキストとして送信
+      current_genre: genre ? genreSelect.options[genreSelect.selectedIndex].text : null,
+      current_budget_max: budgetMax ? budgetMaxSelect.options[budgetMaxSelect.selectedIndex].text : null,
+      current_people: people || null,
+      current_free_drink: !!freeDrink,
+      current_free_food: !!freeFood
+    };
+    
+    fetchOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    };
+  } else {
+    targetUrl += '?' + searchParams.toString();
   }
-  if (people) params.append('people', people);
-  if (freeDrink) params.append('free_drink', freeDrink);
-  if (freeFood) params.append('free_food', freeFood);
 
   try {
-    const res = await fetch(`/api/restaurants/search/?${params.toString()}`);
+    const res = await fetch(targetUrl, fetchOptions);
     const data = await res.json();
 
     if (data.shops && data.shops.length > 0) {
@@ -725,14 +858,41 @@ function renderResults(shops) {
         <div class="card-img-container">
           <img src="${imgUrl}" alt="${shop.name}" class="card-img" loading="lazy" />
           ${favBtnHTML}
+          ${review.visitCount > 0 ? `<div class="visit-overlay"><span class="material-icons-round">check_circle</span></div>` : ''}
         </div>
         <div class="card-body">
           <h3 class="card-title">${shop.name}</h3>
+          <div class="card-rating-row">
+            ${visitBadge}
+          </div>
+
+          <div class="card-info-section">
+            ${shop.ai_reason ? `
+              <div class="ai-reason-badge">
+                <span class="material-icons-round">auto_awesome</span>
+                <p>${shop.ai_reason}</p>
+              </div>
+            ` : ''}
+
+            <div class="card-external-ratings">
+              ${(shop.google_rating || shop.is_google) ? `
+                <div class="ext-rating google" title="Google Maps 評価">
+                   <img src="https://www.google.com/images/branding/product/ico/maps15_bnuw3a_32dp.ico" width="14" height="14">
+                   <span>${shop.google_rating ? shop.google_rating.toFixed(1) : '評価あり'}</span>
+                </div>` : ''}
+              ${(shop.is_hotpepper || (shop.url && shop.url.includes('hotpepper'))) ? `
+                <div class="ext-rating hotpepper" title="HotPepper 掲載">
+                   <span class="hp-letter">H</span>
+                   <span>HotPepper掲載</span>
+                </div>` : ''}
+            </div>
+          </div>
+
           <div class="card-meta">
             ${shop.genre ? `<span class="meta-badge">${shop.genre}</span>` : ''}
             ${shop.budget ? `<span class="meta-badge">${formatBudgetName(shop.budget)}</span>` : ''}
-            ${visitBadge}
           </div>
+
           <div class="card-distance">
             <span class="material-icons-round" style="font-size: 14px;">place</span>
             ${shop.distance_km ? `ここから徒歩 約${shop.walk_time_min}分 (${shop.distance_km}km)` : (shop.address || '')}
@@ -836,13 +996,27 @@ function renderDetailPage(shopId) {
         ${shop.genre ? `<span class="meta-badge">${shop.genre}</span>` : ''}
         ${shop.budget ? `<span class="meta-badge">${formatBudgetName(shop.budget)}</span>` : ''}
       </div>
+
+      <div class="card-external-ratings" style="margin: 0.8rem 0 1.2rem 0;">
+        ${(shop.google_rating || shop.is_google) ? `
+          <div class="ext-rating google">
+             <img src="https://www.google.com/images/branding/product/ico/maps15_bnuw3a_32dp.ico" width="14" height="14">
+             <span>Google Maps: ${shop.google_rating ? shop.google_rating.toFixed(1) : '評価あり'}</span>
+          </div>` : ''}
+        ${(shop.is_hotpepper || (shop.url && shop.url.includes('hotpepper'))) ? `
+          <div class="ext-rating hotpepper">
+             <span class="hp-letter">H</span>
+             <span>HotPepper掲載店</span>
+          </div>` : ''}
+      </div>
+
       <div class="detail-address">
         <span class="material-icons-round">place</span>
         <span>${shop.address || '住所情報なし'}</span>
       </div>
       ${shop.open ? `<div class="detail-open"><span class="material-icons-round">schedule</span><span>${shop.open}</span></div>` : ''}
       <div class="detail-links">
-        ${shop.url ? `<a href="${shop.url}" target="_blank" class="detail-link"><span class="material-icons-round">open_in_new</span>HotPepperで見る</a>` : ''}
+        ${shop.source === 'hotpepper' && shop.url ? `<a href="${shop.url}" target="_blank" class="detail-link"><span class="material-icons-round">open_in_new</span>HotPepperで見る</a>` : ''}
         <a href="${googleMapsUrl}" target="_blank" class="detail-link detail-link-map"><span class="material-icons-round">map</span>Googleマップで見る</a>
         <button class="detail-link share-btn" id="share-btn" data-shop-id="${shopId}">
           <span class="material-icons-round">share</span>シェア
@@ -869,26 +1043,6 @@ function renderDetailPage(shopId) {
       </div>
     </div>
 
-    <!-- Star Rating (0.1 increments) -->
-    <div class="detail-rating-card glass-card">
-      <h3 class="detail-section-title">
-        <span class="material-icons-round">star</span>
-        評価
-      </h3>
-      <div class="rating-display">
-        <div class="rating-stars-visual">
-          ${[1,2,3,4,5].map(i => {
-            const fill = Math.min(Math.max(review.rating - (i - 1), 0), 1) * 100;
-            return `<div class="star-visual"><span class="material-icons-round star-bg">star</span><span class="material-icons-round star-fg" style="clip-path: inset(0 ${100 - fill}% 0 0)">star</span></div>`;
-          }).join('')}
-        </div>
-        <span class="rating-value" id="rating-value">${review.rating > 0 ? review.rating.toFixed(1) : '0.0'}</span>
-      </div>
-      <div class="rating-slider-group">
-        <input type="range" id="rating-slider" class="rating-slider" min="0" max="5" step="0.1" value="${review.rating}">
-        <div class="slider-labels"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
-      </div>
-    </div>
     ` : ''}
 
     <!-- Comment -->
@@ -960,21 +1114,7 @@ function renderDetailPage(shopId) {
     });
   }
 
-  // Rating slider (0.1 increments)
-  const ratingSlider = document.getElementById('rating-slider');
-  if (ratingSlider) {
-    ratingSlider.addEventListener('input', () => {
-      const val = parseFloat(ratingSlider.value);
-      const ud = getUserData(shopId);
-      ud.rating = val;
-      saveUserData();
-      document.getElementById('rating-value').textContent = val.toFixed(1);
-      document.querySelectorAll('.star-fg').forEach((star, idx) => {
-        const fill = Math.min(Math.max(val - idx, 0), 1) * 100;
-        star.style.clipPath = `inset(0 ${100 - fill}% 0 0)`;
-      });
-    });
-  }
+  // Rating slider removed
 
   // Comments system
   function renderComments() {
@@ -1138,9 +1278,7 @@ function renderFavorites() {
   const sortType = document.getElementById('fav-sort-select')?.value || 'added';
   let sorted = [...favorites];
 
-  if (sortType === 'rating') {
-    sorted.sort((a, b) => (getReview(b.id).rating || 0) - (getReview(a.id).rating || 0));
-  } else if (sortType === 'visits') {
+  if (sortType === 'visits') {
     sorted.sort((a, b) => (getReview(b.id).visitCount || 0) - (getReview(a.id).visitCount || 0));
   } else {
     sorted.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
@@ -1150,7 +1288,6 @@ function renderFavorites() {
   sorted.forEach(shop => {
     const review = getReview(shop.id);
     const imgUrl = shop.photo || 'https://via.placeholder.com/80x80.png?text=No+Image';
-    const stars = '★'.repeat(review.rating) + '☆'.repeat(5 - review.rating);
 
     container.insertAdjacentHTML('beforeend', `
       <div class="fav-card glass-card-subtle" data-shop-id="${shop.id}">
@@ -1158,8 +1295,20 @@ function renderFavorites() {
         <div class="fav-card-body">
           <h3 class="fav-card-name">${shop.name}</h3>
           <div class="fav-card-meta">
-            <span class="fav-stars">${stars}</span>
             <span class="fav-visits">${review.visitCount}回来店</span>
+          </div>
+
+          <div class="card-external-ratings">
+            ${(shop.google_rating || shop.is_google) ? `
+              <div class="ext-rating google" title="Google Maps 評価">
+                 <img src="https://www.google.com/images/branding/product/ico/maps15_bnuw3a_32dp.ico" width="14" height="14">
+                 <span>${shop.google_rating ? shop.google_rating.toFixed(1) : '評価あり'}</span>
+              </div>` : ''}
+            ${(shop.is_hotpepper || (shop.url && shop.url.includes('hotpepper'))) ? `
+              <div class="ext-rating hotpepper" title="HotPepper 掲載">
+                 <span class="hp-letter">H</span>
+                 <span>HotPepper掲載</span>
+              </div>` : ''}
           </div>
           ${shop.genre ? `<span class="meta-badge" style="font-size: 0.7rem;">${shop.genre}</span>` : ''}
         </div>
@@ -1190,6 +1339,7 @@ function renderFavorites() {
   });
 }
 
+  // (Manual search form handles keyword-based AI search now)
 // ============================================================
 // Search History Functions
 // ============================================================
@@ -1746,6 +1896,102 @@ function renderThemeSettings() {
   keysToRemove.forEach(k => localStorage.removeItem(k));
   localStorage.setItem('izakaya_data_migrated_v2', '1');
 })();
+
+async function renderAdminStats() {
+  const totalUsersVal = document.getElementById('total-users-val');
+  const userEmailList = document.getElementById('user-email-list');
+  
+  if (!totalUsersVal || !userEmailList) return;
+
+  try {
+    const res = await fetch('/api/restaurants/admin/stats/');
+    if (!res.ok) {
+        if (res.status === 403) {
+            userEmailList.innerHTML = `<div style="color: var(--danger)">アクセス権限がありません</div>`;
+            return;
+        }
+        throw new Error('Stats fetch failed');
+    }
+    const data = await res.json();
+    
+    totalUsersVal.textContent = data.total_users;
+    userEmailList.innerHTML = (data.user_emails || []).map(email => `<div style="border-bottom: 1px solid rgba(255,255,255,0.05); padding: 4px 0;">${email}</div>`).join('');
+    
+    drawAdminCharts(data);
+  } catch (err) {
+    console.error('Admin stats error:', err);
+    userEmailList.innerHTML = `<div style="color: var(--danger)">通信エラーが発生しました</div>`;
+  }
+}
+
+let budgetChartInstance = null;
+let peopleChartInstance = null;
+
+function drawAdminCharts(data) {
+  const budgetCtx = document.getElementById('budgetChart');
+  const peopleCtx = document.getElementById('peopleChart');
+  if (!budgetCtx || !peopleCtx) return;
+
+  const bCtx = budgetCtx.getContext('2d');
+  const pCtx = peopleCtx.getContext('2d');
+
+  // Budget Chart
+  const budgetLabels = Object.keys(data.budget_stats || {});
+  const budgetValues = Object.values(data.budget_stats || {});
+
+  if (budgetChartInstance) budgetChartInstance.destroy();
+  budgetChartInstance = new Chart(bCtx, {
+    type: 'pie',
+    data: {
+      labels: budgetLabels,
+      datasets: [{
+        label: '検索数',
+        data: budgetValues,
+        backgroundColor: [
+          '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'
+        ],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#333' } }
+      }
+    }
+  });
+
+  // People Chart
+  const pStats = data.people_stats || {};
+  const peopleLabels = Object.keys(pStats).sort((a,b) => parseInt(a)-parseInt(b)).map(k => `${k}人`);
+  const peopleValues = Object.keys(pStats).sort((a,b) => parseInt(a)-parseInt(b)).map(k => pStats[k]);
+
+  if (peopleChartInstance) peopleChartInstance.destroy();
+  peopleChartInstance = new Chart(pCtx, {
+    type: 'bar',
+    data: {
+      labels: peopleLabels,
+      datasets: [{
+        label: '検索数',
+        data: peopleValues,
+        backgroundColor: '#8e44ad',
+        borderRadius: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        x: { ticks: { color: '#333' } },
+        y: { beginAtZero: true, ticks: { color: '#333', stepSize: 1 } }
+      }
+    }
+  });
+}
 
 // ============================================================
 // Start

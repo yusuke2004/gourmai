@@ -796,13 +796,14 @@ option {
   flex-shrink: 0;
   background-color: var(--bg-card);
   overflow: hidden;
+  position: relative;
 }
 
 .card-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.5s ease;
+  transition: transform 0.6s ease;
 }
 
 .result-card:hover .card-img {
@@ -810,7 +811,7 @@ option {
 }
 
 .card-body {
-  padding: 0.875rem 1rem;
+  padding: 0.85rem 1rem;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -822,6 +823,69 @@ option {
   font-weight: 700;
   margin-bottom: 0.25rem;
   line-height: 1.3;
+}
+
+/* Card Rating Row */
+.card-rating-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.card-stars {
+  display: flex;
+  gap: 1px;
+}
+
+.star-mini {
+  position: relative;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.star-mini .material-icons-round {
+  font-size: 14px;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.star-mini .star-bg {
+  color: rgba(255, 255, 255, 0.15);
+}
+
+.star-mini .star-fg {
+  color: var(--warning);
+}
+
+.rating-num {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+/* Visit Overlay on image */
+.visit-overlay {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--success);
+  color: #000;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+
+.visit-overlay .material-icons-round {
+  font-size: 14px;
 }
 
 .card-meta {
@@ -1360,6 +1424,30 @@ option {
   cursor: pointer;
   color: var(--text-main);
   transition: background 0.2s;
+}
+
+.ai-reason-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, rgba(142, 68, 173, 0.15) 0%, rgba(103, 58, 183, 0.15) 100%);
+  border: 1px solid rgba(142, 68, 173, 0.3);
+  padding: 8px 12px;
+  border-radius: 12px;
+  margin: 12px 0;
+}
+
+.ai-reason-badge .material-icons-round {
+  color: var(--accent);
+  font-size: 1.2rem;
+}
+
+.ai-reason-badge p {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #fff;
+  line-height: 1.4;
 }
 
 .back-btn:hover {
@@ -2676,4 +2764,47 @@ option {
   .theme-options-grid {
     grid-template-columns: repeat(3, 1fr);
   }
+}
+
+/* ==================== External Ratings ==================== */
+.card-external-ratings {
+  display: flex;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.ext-rating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.ext-rating.google {
+  border-left: 2px solid #4285F4;
+}
+
+.ext-rating.hotpepper {
+  border-left: 2px solid #F00032;
+}
+
+.hp-letter {
+  background: #F00032;
+  color: white;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 900;
+  border-radius: 3px;
+  line-height: 1;
 }

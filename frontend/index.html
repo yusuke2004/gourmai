@@ -40,6 +40,10 @@
         <span class="material-icons-round">person</span>
         <span class="nav-label">マイページ</span>
       </a>
+      <a href="#/admin" class="nav-item hidden" id="admin-nav" data-page="admin">
+        <span class="material-icons-round">analytics</span>
+        <span class="nav-label">統計</span>
+      </a>
     </nav>
 
     <!-- ==================== PAGE: HOME ==================== -->
@@ -74,6 +78,7 @@
       <!-- Search & Results Section -->
       <main class="main-content">
         <section class="search-section" id="search-section">
+
           <div class="search-card glass-card">
             <div class="card-header">
               <span class="material-icons-round card-header-icon">tune</span>
@@ -143,9 +148,12 @@
                 <input type="number" id="people-input" name="people" placeholder="例: 2" class="text-input" min="1">
               </div>
 
-              <div class="form-group">
-                <label for="keyword-input">フリーワード・気分</label>
-                <input type="text" id="keyword-input" name="keyword" placeholder="例: 個室, デート, 静か" class="text-input">
+              <div class="form-group keyword-group">
+                <label for="keyword-input">こだわり条件・項目（AIが詳しく解析します）</label>
+                <div class="input-with-icon">
+                  <span class="material-icons-round" style="position: absolute; left: 12px; top: 11px; color: var(--accent); font-size: 1.2rem; pointer-events: none;">psychology</span>
+                  <input type="text" id="keyword-input" name="keyword" placeholder="例：個室あり, 禁煙, 落ち着いた雰囲気, デート向け など" class="text-input" style="padding-left: 40px;">
+                </div>
               </div>
 
               <div class="form-group options-group">
@@ -254,7 +262,50 @@
 
             <div class="login-signup">
               <span>アカウントをお持ちでないですか？</span>
-              <a href="#" class="link-accent">新規登録</a>
+              <a href="#/register" class="link-accent">新規登録</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ==================== PAGE: REGISTER ==================== -->
+    <div id="page-register" class="page">
+      <section class="login-page">
+        <div class="login-bg-overlay"></div>
+        <div class="login-content">
+          <div class="login-brand">
+            <h1 class="logo-title">GourmetCanvas</h1>
+            <p class="login-tagline">今の気分に合う至高の一皿を。</p>
+          </div>
+
+          <div class="login-card glass-card">
+            <h2 class="login-card-title">新規登録</h2>
+
+            <form id="register-form" class="login-form">
+              <div class="form-group">
+                <label for="register-name">表示名</label>
+                <input type="text" id="register-name" placeholder="お名前" class="text-input" required>
+              </div>
+              <div class="form-group">
+                <label for="register-email">メールアドレス</label>
+                <input type="email" id="register-email" placeholder="example@email.com" class="text-input" required>
+              </div>
+              <div class="form-group">
+                <label for="register-password">パスワード</label>
+                <div class="password-wrapper">
+                  <input type="password" id="register-password" placeholder="パスワードを設定" class="text-input" required>
+                </div>
+              </div>
+
+              <button type="submit" class="btn primary-btn btn-block">
+                <span>登録する</span>
+              </button>
+            </form>
+
+            <div class="login-signup">
+              <span>既にアカウントをお持ちですか？</span>
+              <a href="#/login" class="link-accent">ログイン</a>
             </div>
           </div>
         </div>
@@ -462,7 +513,6 @@
           <span class="fav-sort-label">並び替え:</span>
           <select id="fav-sort-select" class="text-input sort-select">
             <option value="added">追加順</option>
-            <option value="rating">星評価順</option>
             <option value="visits">来店回数順</option>
           </select>
         </div>
@@ -525,6 +575,41 @@
       </section>
     </div>
 
+    <!-- ==================== PAGE: ADMIN STATS ==================== -->
+    <div id="page-admin" class="page">
+      <section class="history-page">
+        <header class="page-header">
+           <h1 class="page-header-title">管理者ダッシュボード</h1>
+        </header>
+
+        <div class="stats-grid-admin" style="display: grid; grid-template-columns: 1fr; gap: 1.5rem; padding: 1.5rem;">
+          <div class="glass-card stat-card-admin" style="padding: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+               <span class="material-icons-round" style="color: var(--accent); font-size: 2rem;">people</span>
+               <h3 style="margin: 0;">登録ユーザー数: <span id="total-users-val" style="color: var(--accent); font-size: 1.5rem;">0</span></h3>
+            </div>
+            <div id="user-email-list" style="max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 0.8rem; border-radius: 12px; font-family: monospace; font-size: 0.85rem; line-height: 1.6;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+            <div class="glass-card chart-card-admin" style="padding: 1.5rem; min-height: 350px;">
+              <h4 style="margin-top: 0; margin-bottom: 1.5rem;">予算別検索トレンド (上限)</h4>
+              <div style="height: 250px; width: 100%;">
+                <canvas id="budgetChart"></canvas>
+              </div>
+            </div>
+            <div class="glass-card chart-card-admin" style="padding: 1.5rem; min-height: 350px;">
+              <h4 style="margin-top: 0; margin-bottom: 1.5rem;">人数別検索トレンド</h4>
+              <div style="height: 250px; width: 100%;">
+                <canvas id="peopleChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <!-- ==================== PAGE: VISIT HISTORY ==================== -->
     <div id="page-visit-history" class="page">
       <section class="history-page">
@@ -567,6 +652,7 @@
 
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 

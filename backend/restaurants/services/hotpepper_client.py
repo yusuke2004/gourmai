@@ -107,11 +107,10 @@ def search_restaurants(
         "lng": lng,
         "range": range, # Changed from range_val to range as per original code
         "format": "json",
-        "count": 50,  # 取得件数（最大100）
-        "order": 4    # 4: おすめ順 (HotPepper標準の独自のスコアリングアルゴリズム)
+        "count": 100,  # 取得件数（最大100）
+        "order": 4    # 4: おすめ順
     }
 
-    # パラメータのジャンル指定があれば追加（未指定のばあいは全てのジャンルを対象とする）
     if genre:
         params["genre"] = genre
     if budget:
@@ -133,6 +132,7 @@ def search_restaurants(
         if "results" in data and "error" in data["results"]:
             errors = data["results"]["error"]
             error_msgs = ", ".join([e.get("message", "") for e in errors])
+            logger.error(f"HotPepper API Result Error: {error_msgs}")
             raise HotPepperAPIError(f"API Error: {error_msgs}")
             
         shops = data.get("results", {}).get("shop", [])
@@ -142,17 +142,23 @@ def search_restaurants(
         for shop in shops:
             shop_name = shop.get("name", "")
             shop_catch = shop.get("catch", "")
+            shop_address = shop.get("address", "")
             
-            # 1. 閉店店舗等の除外
-            # HotPepper APIは閉店フラグがないため、テキストから推測する
+            # 1. 閉店店店舗等の除外
             if "閉店" in shop_name or "閉店" in shop_catch:
                 continue
 
-            # 2. ジャンル厳密一致チェック
-            target_genre = params.get("genre")
-            if target_genre:
+            # 2. キーワードフィルタ (複数単語対応)
+            if keyword:
+                text_to_search = f"{shop_name} {shop_address} {shop_catch} {shop.get('access', '')}".lower()
+                query_words = keyword.lower().split()
+                if not all(word in text_to_search for word in query_words):
+                    continue
+
+            # 3. ジャンル厳密一致チェック
+            if genre:
                 shop_genre_code = shop.get("genre", {}).get("code", "")
-                if shop_genre_code != target_genre:
+                if shop_genre_code != genre:
                     continue
             
             filtered_shops.append(shop)
@@ -168,12 +174,14 @@ def search_restaurants(
             walk_time_min = estimate_walk_time(distance_km)
             
             formatted_shops.append({
+                "source": "hotpepper",
                 "originalIndex": idx, # フロントエンドで「おすすめ順」に戻す用
                 "id": shop.get("id", ""),
                 "name": shop.get("name", ""),
                 "address": shop.get("address", ""),
                 "genre": shop.get("genre", {}).get("name", "") if isinstance(shop.get("genre"), dict) else "",
                 "budget": shop.get("budget", {}).get("name", "") if isinstance(shop.get("budget"), dict) else "",
+                "raw_budget_code": shop.get("budget", {}).get("code", "") if isinstance(shop.get("budget"), dict) else "",
                 "lat": shop_lat,
                 "lng": shop_lng,
                 "photo": (
@@ -223,7 +231,7 @@ def search_by_keyword(
         "key": api_key,
         "keyword": keyword,
         "format": "json",
-        "count": 50,
+        "count": 100,
         "order": 4
     }
 
@@ -250,7 +258,6 @@ def search_by_keyword(
             
         shops = data.get("results", {}).get("shop", [])
         
-        # Same filtering as search_restaurants
         filtered_shops = []
         for shop in shops:
             shop_name = shop.get("name", "")
@@ -259,10 +266,18 @@ def search_by_keyword(
             if "閉店" in shop_name or "閉店" in shop_catch:
                 continue
 
-            target_genre = params.get("genre")
-            if target_genre:
+            # キーワードフィルタ (複数単語対応)
+            if keyword:
+                search_targets = [shop_name, shop_catch, shop.get("address", ""), shop.get("access", ""), shop.get("genre", {}).get("name", "")]
+                text_to_search = " ".join([t for t in search_targets if t]).lower()
+                query_words = keyword.lower().split()
+                if not all(word in text_to_search for word in query_words):
+                    continue
+
+            # ジャンル厳密一致
+            if genre:
                 shop_genre_code = shop.get("genre", {}).get("code", "")
-                if shop_genre_code != target_genre:
+                if shop_genre_code != genre:
                     continue
             
             filtered_shops.append(shop)
@@ -273,12 +288,14 @@ def search_by_keyword(
             shop_lng = float(shop.get("lng", 0))
             
             formatted_shops.append({
+                "source": "hotpepper",
                 "originalIndex": idx,
                 "id": shop.get("id", ""),
                 "name": shop.get("name", ""),
                 "address": shop.get("address", ""),
                 "genre": shop.get("genre", {}).get("name", "") if isinstance(shop.get("genre"), dict) else "",
                 "budget": shop.get("budget", {}).get("name", "") if isinstance(shop.get("budget"), dict) else "",
+                "raw_budget_code": shop.get("budget", {}).get("code", "") if isinstance(shop.get("budget"), dict) else "",
                 "lat": shop_lat,
                 "lng": shop_lng,
                 "photo": (

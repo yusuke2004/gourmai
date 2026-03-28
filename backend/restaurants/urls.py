@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path("ping/", views.ping, name="ping"),
     path("search/", views.search, name="search"),
+    path("natural-search/", views.natural_search, name="natural_search"),
     path("budgets/", views.budgets, name="budgets"),
     path("genres/", views.genres, name="genres"),
     # Auth
@@ -26,4 +27,6 @@ urlpatterns = [
     path("search-history/", views.search_history_view, name="search_history"),
     # Share
     path("share/<str:shop_id>/", views.share_view, name="share"),
+    # Stats
+    path("admin/stats/", views.admin_stats_view, name="admin_stats"),
 ]
