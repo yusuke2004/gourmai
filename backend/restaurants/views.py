@@ -135,7 +135,7 @@ def _perform_combined_search(
         # 小文字化、空白、記号除去
         import re
         n = n.lower()
-        n = re.sub(r'[ 　\(\)（）-\.\[\]]', '', n)
+        n = re.sub(r'[ 　\(\)（）\-\.\[\]]', '', n)
         # よくある末尾の店舗表現をカット
         for suffix in ["店", "駅前", "成城店", "新宿店", "池袋店", "本店", "分店"]:
             if n.endswith(suffix) and len(n) > len(suffix) + 1:
@@ -224,8 +224,11 @@ def _perform_combined_search(
             query_params=original_query_params,
             result_count=len(shops),
         )
-    
-    #@api_view(["POST"])
+
+    return shops
+
+
+@api_view(["POST"])
 def natural_search(request: Request) -> Response:
     """
     Geminiを使用した自然言語検索
