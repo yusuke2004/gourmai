@@ -337,39 +337,6 @@ def natural_search(request: Request) -> Response:
             "error": "Internal search error",
             "shops": []
         }, status=200)
-��検索ロジック呼び出し
-    lat = float(lat_param) if lat_param else None
-    lng = float(lng_param) if lng_param else None
-    
-    shops = _perform_combined_search(
-        lat=lat, lng=lng,
-        budget_min=budget_min_code,
-        budget_max=budget_max_code,
-        genre=hp_genre_code,
-        keyword=effective_keyword or query,
-        people=str(people_val) if people_val else None,
-        user=request.user,
-        original_query_params={"natural_query": query}
-    )
-    
-    # フォールバック: キーワード検索が厳しすぎて1件も見つからない場合、エリアだけで検索
-    if not shops and effective_keyword:
-        logger.info("No shops found with keyword. Falling back to broader area search.")
-        shops = _perform_combined_search(
-            lat=lat, lng=lng,
-            budget_max=budget_max_code,
-            genre=hp_genre_code,
-            user=request.user
-        )
-
-    # AIでリコメンド・理由生成・ソートを実施
-    if shops:
-        shops = generate_ai_recommendation(query, shops)
-    
-    return Response({
-        "params": parsed,
-        "shops": shops
-    })
 
 @api_view(["GET"])
 def search(request: Request) -> Response:

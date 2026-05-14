@@ -2,7 +2,7 @@ Django>=4.2
 djangorestframework
 django-cors-headers
 requests
-google-generativeai
+google-genai
 python-dotenv
 psycopg2-binary
 whitenoise
