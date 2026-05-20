@@ -36,5 +36,5 @@ RUN SECRET_KEY=build-time-dummy-not-used-at-runtime \
 # Expose port
 EXPOSE 8000
 
-# Start with gunicorn
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+# Start: マイグレーション適用 → gunicorn 起動
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000"]
