@@ -29,7 +29,9 @@ RUN npm run build
 WORKDIR /app/backend
 
 # Collect static files
-RUN python manage.py collectstatic --noinput
+# SECRET_KEY はビルド時のダミー値。実行時は Render の環境変数で上書きされる。
+RUN SECRET_KEY=build-time-dummy-not-used-at-runtime \
+    python manage.py collectstatic --noinput
 
 # Expose port
 EXPOSE 8000
