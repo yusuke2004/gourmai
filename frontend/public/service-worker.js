@@ -5,7 +5,7 @@
  * - API (/api/) はネットワーク優先 + 失敗時に最後の成功レスポンスを返す
  * - その他 (HTML) はネットワーク優先
  */
-const CACHE_VERSION = 'gc-v1';
+const CACHE_VERSION = 'gourmai-v1';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 
