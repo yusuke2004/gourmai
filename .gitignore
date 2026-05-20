@@ -6,6 +6,13 @@ __pycache__/
 *.sqlite3
 *.db
 .venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# mypy / pyright work artifacts
+mypy_out*.txt
+out.txt
 
 # Django
 staticfiles/
@@ -17,6 +24,8 @@ dist/
 
 # Environment
 .env
+.env.local
+.env.*.local
 
 # IDEs
 .vscode/
@@ -34,3 +43,8 @@ Thumbs.db
 
 # Render
 env/
+
+# Misc dev artifacts
+diff.patch
+*.bak
+*.tmp

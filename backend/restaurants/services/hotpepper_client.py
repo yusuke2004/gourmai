@@ -3,8 +3,13 @@ import logging
 import requests
 from typing import Dict, Any, List, Optional
 from utils.location import calculate_distance, estimate_walk_time
+from utils.cache import cached
 
 logger = logging.getLogger(__name__)
+
+# キャッシュ TTL
+_MASTER_TTL = 60 * 60 * 24  # 予算 / ジャンルマスタは1日
+_SEARCH_TTL = 60 * 5         # 検索結果は 5 分
 
 class HotPepperAPIError(Exception):
     """HotPepper APIからエラーが返された場合のカスタム例外"""
@@ -18,53 +23,44 @@ def get_api_key() -> str:
     return api_key or ""
 
 def get_budget_master() -> List[Dict[str, Any]]:
-    """予算マスタを取得する"""
-    url = "http://webservice.recruit.co.jp/hotpepper/budget/v1/"
-    params = {
-        "key": get_api_key(),
-        "format": "json"
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=5.0)
-        response.raise_for_status()
-        data = response.json()
-        
-        # API側のエラーチェック
-        if "results" in data and "error" in data["results"]:
-            errors = data["results"]["error"]
-            error_msgs = ", ".join([e.get("message", "") for e in errors])
-            raise HotPepperAPIError(f"API Error: {error_msgs}")
-            
-        return data.get("results", {}).get("budget", [])
-    
-    except Exception as e:
-        logger.error(f"Failed to fetch budget master: {e}")
-        return []
+    """予算マスタを取得する (1日キャッシュ)"""
+    def _call() -> List[Dict[str, Any]]:
+        url = "http://webservice.recruit.co.jp/hotpepper/budget/v1/"
+        params = {"key": get_api_key(), "format": "json"}
+        try:
+            response = requests.get(url, params=params, timeout=5.0)
+            response.raise_for_status()
+            data = response.json()
+            if "results" in data and "error" in data["results"]:
+                errors = data["results"]["error"]
+                error_msgs = ", ".join([e.get("message", "") for e in errors])
+                raise HotPepperAPIError(f"API Error: {error_msgs}")
+            return data.get("results", {}).get("budget", [])
+        except Exception as e:
+            logger.error(f"Failed to fetch budget master: {e}")
+            return []
+
+    return cached("hp:budget_master", "v1", _MASTER_TTL, _call) or []
 
 def get_genre_master() -> List[Dict[str, Any]]:
-    """ジャンルマスタを取得する"""
-    url = "http://webservice.recruit.co.jp/hotpepper/genre/v1/"
-    params = {
-        "key": get_api_key(),
-        "format": "json"
-    }
-    
-    try:
-        response = requests.get(url, params=params, timeout=5.0)
-        response.raise_for_status()
-        data = response.json()
-        
-        if "results" in data and "error" in data["results"]:
-            errors = data["results"]["error"]
-            error_msgs = ", ".join([e.get("message", "") for e in errors])
-            raise HotPepperAPIError(f"API Error: {error_msgs}")
-            
-        return data.get("results", {}).get("genre", [])
-        
-    except Exception as e:
-        logger.error(f"Failed to fetch genre master: {e}")
-        return []
+    """ジャンルマスタを取得する (1日キャッシュ)"""
+    def _call() -> List[Dict[str, Any]]:
+        url = "http://webservice.recruit.co.jp/hotpepper/genre/v1/"
+        params = {"key": get_api_key(), "format": "json"}
+        try:
+            response = requests.get(url, params=params, timeout=5.0)
+            response.raise_for_status()
+            data = response.json()
+            if "results" in data and "error" in data["results"]:
+                errors = data["results"]["error"]
+                error_msgs = ", ".join([e.get("message", "") for e in errors])
+                raise HotPepperAPIError(f"API Error: {error_msgs}")
+            return data.get("results", {}).get("genre", [])
+        except Exception as e:
+            logger.error(f"Failed to fetch genre master: {e}")
+            return []
+
+    return cached("hp:genre_master", "v1", _MASTER_TTL, _call) or []
 
 def search_restaurants(
     lat: float,

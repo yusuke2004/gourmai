@@ -47,7 +47,7 @@ ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get(
         "ALLOWED_HOSTS",
-        "localhost,127.0.0.1,gourmetcanvas.onrender.com",
+        "localhost,127.0.0.1,gourmai.onrender.com",
     ).split(",")
     if host.strip()
 ]
@@ -181,7 +181,7 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,https://gourmetcanvas.onrender.com",
+        "http://localhost:5173,http://127.0.0.1:5173,https://gourmai.onrender.com",
     ).split(",")
     if origin.strip()
 ]
@@ -191,12 +191,14 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://gourmetcanvas.onrender.com",
+    "https://gourmai.onrender.com",
 ]
 
 # Session settings
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 30  # 30 days
+CSRF_COOKIE_HTTPONLY = False  # SPA から CSRF トークンを読めるように維持
 
 # DRF settings
 REST_FRAMEWORK = {
@@ -210,3 +212,78 @@ REST_FRAMEWORK = {
 
 # AutoField warning 対策
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ============================================================
+# Cache (LocMem) — 外部 API クォータ削減と高速化のため
+# ============================================================
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "gourmai-default",
+        "OPTIONS": {
+            "MAX_ENTRIES": 5000,
+            "CULL_FREQUENCY": 4,
+        },
+    },
+}
+
+# ============================================================
+# Rate limit (django-ratelimit) — 共有キャッシュを使う
+# 開発時に切りたい場合は環境変数 RATELIMIT_ENABLE=False で無効化できる
+# ============================================================
+RATELIMIT_ENABLE = os.environ.get("RATELIMIT_ENABLE", "True").lower() == "true"
+RATELIMIT_USE_CACHE = "default"
+RATELIMIT_VIEW = "restaurants.views.ratelimited_view"
+
+# ============================================================
+# モデレーション設定
+# ============================================================
+# コメント本文の最大長 (DB 側は TextField のままで、アプリ層で制限)
+COMMENT_MAX_LENGTH = int(os.environ.get("COMMENT_MAX_LENGTH", "1000"))
+# NG ワード (カンマ区切り)。空でも問題なし。
+NG_WORDS = [
+    w.strip()
+    for w in os.environ.get(
+        "NG_WORDS",
+        "死ね,殺す,キチガイ,バカ,アホ,ksk,◯ね",
+    ).split(",")
+    if w.strip()
+]
+
+# ============================================================
+# Logging — 本番では構造化 JSON ライクな1行ログにする
+# ============================================================
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name}:{lineno} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "restaurants": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}

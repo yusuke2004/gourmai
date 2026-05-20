@@ -3,9 +3,28 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GourmetCanvas | 今の気分に合う至高の一皿を。</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>gourmai | 今の気分に合う至高の一皿を。</title>
   <meta name="description" content="「今の気分」と「現在地」から、あなたにピッタリのお店を提案します。" />
+  <meta name="theme-color" content="#0d0d12" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="gourmai" />
+  <meta property="og:title" content="gourmai | 今の気分に合う至高の一皿を。" />
+  <meta property="og:description" content="「今の気分」と「現在地」から、あなたにピッタリのお店を提案します。" />
+  <meta property="og:locale" content="ja_JP" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="gourmai" />
+  <meta name="twitter:description" content="今の気分に合う至高の一皿を。" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/static/icon-192.png" type="image/png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,6 +34,20 @@
   <!-- Material Icons -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css">
+
+  <!-- JSON-LD: 構造化データ (検索エンジン向け) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "gourmai",
+    "description": "「今の気分」と「現在地」から、あなたにピッタリの飲食店を提案します。",
+    "applicationCategory": "FoodApplication",
+    "operatingSystem": "Web",
+    "inLanguage": "ja-JP",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "JPY" }
+  }
+  </script>
 </head>
 
 <body>
@@ -59,7 +92,7 @@
 
         <div class="hero-overlay">
           <div class="hero-content">
-            <h1 class="logo-title">GourmetCanvas</h1>
+            <h1 class="logo-title">gourmai</h1>
             <p class="hero-subtitle">
               「今の気分」と「現在地」から、<br>
               あなたにピッタリのお店を提案します。
@@ -119,27 +152,19 @@
 
               <div class="form-group">
                 <label for="genre-select">ジャンル</label>
-                <div class="select-wrapper">
+                <div class="select-wrapper select-wrapper--genre">
                   <select id="genre-select" name="genre">
                     <option value="">こだわらない</option>
                   </select>
                 </div>
               </div>
 
-              <div class="form-group budget-range-group">
-                <label>予算</label>
-                <div class="budget-inputs">
-                  <div class="select-wrapper">
-                    <select id="budget-min-select" name="budget_min">
-                      <option value="">下限なし</option>
-                    </select>
-                  </div>
-                  <span class="range-separator">〜</span>
-                  <div class="select-wrapper">
-                    <select id="budget-max-select" name="budget_max">
-                      <option value="">上限なし</option>
-                    </select>
-                  </div>
+              <div class="form-group">
+                <label for="budget-max-input">予算（上限）</label>
+                <div class="input-with-suffix">
+                  <input type="number" id="budget-max-input" name="budget_max" class="text-input"
+                    placeholder="例: 5000" min="0" step="500" inputmode="numeric">
+                  <span class="input-suffix">円まで</span>
                 </div>
               </div>
 
@@ -182,6 +207,28 @@
           </div>
         </section>
 
+        <!-- Recommendations Section -->
+        <section id="recommendations-section" class="recommendations-section hidden">
+          <div class="reco-block" id="reco-discovery-block" hidden>
+            <div class="results-header">
+              <h2 class="section-title"><span class="material-icons-round">auto_awesome</span>あなたへのおすすめ</h2>
+            </div>
+            <div class="reco-scroll" id="reco-discovery-list"></div>
+          </div>
+          <div class="reco-block" id="reco-revisit-block" hidden>
+            <div class="results-header">
+              <h2 class="section-title"><span class="material-icons-round">replay</span>また行きたいお店</h2>
+            </div>
+            <div class="reco-scroll" id="reco-revisit-list"></div>
+          </div>
+          <div class="reco-block" id="reco-popular-block" hidden>
+            <div class="results-header">
+              <h2 class="section-title"><span class="material-icons-round">local_fire_department</span>いま人気のお店</h2>
+            </div>
+            <div class="reco-scroll" id="reco-popular-list"></div>
+          </div>
+        </section>
+
         <!-- Results Section -->
         <section id="results-section" class="results-section hidden">
           <div class="results-header">
@@ -200,8 +247,152 @@
       </main>
 
       <footer class="app-footer">
-        <p>Powered by HotPepper API</p>
+        <p>Powered by HotPepper API / Google Maps</p>
+        <nav class="footer-links">
+          <a href="#/terms" class="link-muted">利用規約</a>
+          <span aria-hidden="true">・</span>
+          <a href="#/privacy" class="link-muted">プライバシーポリシー</a>
+          <span aria-hidden="true">・</span>
+          <a href="#/tokushoho" class="link-muted">特商法表記</a>
+          <span aria-hidden="true">・</span>
+          <a href="#/contact" class="link-muted">お問い合わせ</a>
+        </nav>
       </footer>
+    </div>
+
+    <!-- ==================== PAGE: TERMS ==================== -->
+    <div id="page-terms" class="page">
+      <section class="legal-page">
+        <header class="page-header">
+          <button class="icon-btn back-btn" onclick="history.back()" aria-label="戻る">
+            <span class="material-icons-round">arrow_back</span>
+          </button>
+          <h1 class="page-header-title">利用規約</h1>
+        </header>
+        <article class="legal-content glass-card">
+          <h2>第1条（目的）</h2>
+          <p>本規約は、gourmai（以下「本サービス」）の利用条件を定めるものです。本サービスをご利用になるすべての方は、本規約に同意したものとみなします。</p>
+
+          <h2>第2条（アカウント）</h2>
+          <p>登録情報は正確に入力してください。アカウントの不正利用については利用者本人の責任となります。退会はマイページからいつでも可能です。</p>
+
+          <h2>第3条（禁止事項）</h2>
+          <ul>
+            <li>他者への誹謗中傷、差別的表現、虚偽情報の投稿</li>
+            <li>本サービスや第三者の知的財産権を侵害する行為</li>
+            <li>不正アクセス、過度な自動化アクセス、リバースエンジニアリング</li>
+            <li>営利目的のスパム投稿・広告投稿</li>
+            <li>その他、運営者が不適切と判断する行為</li>
+          </ul>
+
+          <h2>第4条（投稿コンテンツ）</h2>
+          <p>ユーザーが投稿したコメント等のコンテンツについて、運営者は本サービスの提供・改善のために無償で利用できるものとします。違反コンテンツは事前通告なく削除・非表示にする場合があります。</p>
+
+          <h2>第5条（外部サービス）</h2>
+          <p>本サービスは、株式会社リクルートが提供する「ホットペッパーグルメ Webサービス」および Google LLC の提供する Google Maps を利用しています。店舗情報はこれら外部サービスに準拠し、最新性・正確性を保証するものではありません。</p>
+
+          <h2>第6条（免責）</h2>
+          <p>本サービスの利用により生じた損害について、運営者は故意または重過失がある場合を除き責任を負いません。店舗情報・料金・営業時間等は最終的に各店舗にご確認ください。</p>
+
+          <h2>第7条（規約の変更）</h2>
+          <p>本規約は、必要に応じて事前の通知なく改定することがあります。改定後の規約は本ページに掲載した時点で効力を持ちます。</p>
+
+          <p class="legal-updated">最終更新日: 2026年5月15日</p>
+        </article>
+      </section>
+    </div>
+
+    <!-- ==================== PAGE: PRIVACY POLICY ==================== -->
+    <div id="page-privacy" class="page">
+      <section class="legal-page">
+        <header class="page-header">
+          <button class="icon-btn back-btn" onclick="history.back()" aria-label="戻る">
+            <span class="material-icons-round">arrow_back</span>
+          </button>
+          <h1 class="page-header-title">プライバシーポリシー</h1>
+        </header>
+        <article class="legal-content glass-card">
+          <h2>1. 取得する情報</h2>
+          <ul>
+            <li>メールアドレス、表示名（アカウント登録時）</li>
+            <li>位置情報（現在地検索を選択した場合のみ。サーバーには検索条件のみ保存）</li>
+            <li>検索履歴、お気に入り、来店記録、評価、コメントなどのサービス利用情報</li>
+            <li>コメント投稿時の IP アドレス・User-Agent（スパム / 不正対策のため）</li>
+            <li>Cookie / セッション識別子（ログイン状態の維持・CSRF 対策）</li>
+          </ul>
+
+          <h2>2. 利用目的</h2>
+          <ul>
+            <li>本サービスの提供、機能改善、レコメンドの精度向上</li>
+            <li>不正利用・スパム・誹謗中傷の検出と対応</li>
+            <li>統計データの作成（個人を特定しない集計）</li>
+          </ul>
+
+          <h2>3. 第三者提供</h2>
+          <p>法令に基づく場合を除き、本人の同意なく個人情報を第三者に提供しません。検索のため、入力されたキーワードや位置情報は HotPepper API・Google Maps API・Google Gemini API に送信される場合がありますが、これらは個人を特定する形では送信されません。</p>
+
+          <h2>4. データの保存期間</h2>
+          <ul>
+            <li>検索履歴: 最終アクセスから 180 日</li>
+            <li>店舗表示履歴: 最終アクセスから 90 日</li>
+            <li>アカウント情報: 退会後すみやかに削除（関連レコードもカスケード削除）</li>
+          </ul>
+
+          <h2>5. 利用者の権利</h2>
+          <p>利用者は、自身のアカウント情報の確認・修正・削除（退会）をマイページから行えます。その他のお問い合わせはお問い合わせフォームをご利用ください。</p>
+
+          <h2>6. Cookie</h2>
+          <p>ログイン状態の維持と CSRF 対策のため、必須 Cookie を使用しています。広告目的の Cookie は使用していません。</p>
+
+          <h2>7. 改定</h2>
+          <p>本ポリシーは法令や運用状況に応じて改定する場合があります。重要な変更がある場合はサービス上で告知します。</p>
+
+          <p class="legal-updated">最終更新日: 2026年5月15日</p>
+        </article>
+      </section>
+    </div>
+
+    <!-- ==================== PAGE: 特商法 ==================== -->
+    <div id="page-tokushoho" class="page">
+      <section class="legal-page">
+        <header class="page-header">
+          <button class="icon-btn back-btn" onclick="history.back()" aria-label="戻る">
+            <span class="material-icons-round">arrow_back</span>
+          </button>
+          <h1 class="page-header-title">特定商取引法に基づく表記</h1>
+        </header>
+        <article class="legal-content glass-card">
+          <p>有料サービスの提供開始後に詳細を掲載します。現時点では、本サービスは無料でご利用いただけます。</p>
+          <dl class="legal-dl">
+            <dt>販売事業者</dt><dd>（事業者名 / 個人事業主名を記載）</dd>
+            <dt>運営責任者</dt><dd>（責任者氏名）</dd>
+            <dt>所在地</dt><dd>請求があった場合は遅滞なく開示します</dd>
+            <dt>連絡先</dt><dd>お問い合わせフォームよりご連絡ください</dd>
+            <dt>販売価格</dt><dd>各サービスページに表示する金額（消費税込）</dd>
+            <dt>支払方法</dt><dd>クレジットカード等（サービス開始時に追記）</dd>
+            <dt>引渡し時期</dt><dd>決済確認後、即時にサービスを提供</dd>
+            <dt>返品・キャンセル</dt><dd>サービス特性上、提供開始後の返金は原則承れません</dd>
+          </dl>
+          <p class="legal-updated">最終更新日: 2026年5月15日</p>
+        </article>
+      </section>
+    </div>
+
+    <!-- ==================== PAGE: お問い合わせ ==================== -->
+    <div id="page-contact" class="page">
+      <section class="legal-page">
+        <header class="page-header">
+          <button class="icon-btn back-btn" onclick="history.back()" aria-label="戻る">
+            <span class="material-icons-round">arrow_back</span>
+          </button>
+          <h1 class="page-header-title">お問い合わせ</h1>
+        </header>
+        <article class="legal-content glass-card">
+          <p>ご質問・不具合の報告・通報など、お問い合わせは下記までお願いします。</p>
+          <p><strong>メール:</strong> <a href="mailto:info@ryugakunomadoguchi.com" class="link-accent">info@ryugakunomadoguchi.com</a></p>
+          <p>通報の場合は、対象店舗名・コメント ID・通報理由を添えてご連絡ください。営業時間外の返信は数日かかる場合があります。</p>
+        </article>
+      </section>
     </div>
 
     <!-- ==================== PAGE: LOGIN ==================== -->
@@ -210,7 +401,7 @@
         <div class="login-bg-overlay"></div>
         <div class="login-content">
           <div class="login-brand">
-            <h1 class="logo-title">GourmetCanvas</h1>
+            <h1 class="logo-title">gourmai</h1>
             <p class="login-tagline">今の気分に合う至高の一皿を。</p>
           </div>
 
@@ -240,26 +431,6 @@
               </button>
             </form>
 
-            <div class="login-divider">
-              <span>または</span>
-            </div>
-
-            <div class="social-login-buttons">
-              <button class="btn social-btn google-btn">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                  <path fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
-                  <path fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                  <path fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-                <span>Googleでログイン</span>
-              </button>
-            </div>
-
             <div class="login-signup">
               <span>アカウントをお持ちでないですか？</span>
               <a href="#/register" class="link-accent">新規登録</a>
@@ -275,7 +446,7 @@
         <div class="login-bg-overlay"></div>
         <div class="login-content">
           <div class="login-brand">
-            <h1 class="logo-title">GourmetCanvas</h1>
+            <h1 class="logo-title">gourmai</h1>
             <p class="login-tagline">今の気分に合う至高の一皿を。</p>
           </div>
 
@@ -296,6 +467,16 @@
                 <div class="password-wrapper">
                   <input type="password" id="register-password" placeholder="パスワードを設定" class="text-input" required>
                 </div>
+              </div>
+
+              <div class="form-group">
+                <label class="checkbox-label" style="font-size: 0.9rem;">
+                  <input type="checkbox" id="register-agree" required>
+                  <span class="checkbox-custom"></span>
+                  <a href="#/terms" class="link-accent">利用規約</a> と
+                  <a href="#/privacy" class="link-accent">プライバシーポリシー</a>
+                  に同意します
+                </label>
               </div>
 
               <button type="submit" class="btn primary-btn btn-block">
@@ -380,7 +561,17 @@
           <span>ログアウト</span>
         </button>
 
-        <p class="app-version">GourmetCanvas Premium v1.0.0</p>
+        <!-- Account deletion (collapsed by default for safety) -->
+        <details class="danger-zone">
+          <summary>アカウントの削除（退会）</summary>
+          <p class="danger-text">退会するとお気に入り・来店記録・コメントを含む全データが削除され、復元できません。</p>
+          <button class="btn danger-btn btn-block" id="delete-account-btn">
+            <span class="material-icons-round">delete_forever</span>
+            <span>退会する</span>
+          </button>
+        </details>
+
+        <p class="app-version">gourmai v1.0.0</p>
       </section>
     </div>
 
@@ -498,7 +689,7 @@
           </a>
         </div>
 
-        <p class="app-version">GourmetCanvas Premium v1.0.0</p>
+        <p class="app-version">gourmai Premium v1.0.0</p>
       </section>
     </div>
 

@@ -1,5 +1,5 @@
 /**
- * GourmetCanvas - Main Application
+ * gourmai - Main Application
  * SPA with hash routing, Three.js 3D background, and Stitch-inspired design
  */
 import { initThreeBackground } from './three-bg.js';
@@ -20,49 +20,117 @@ const routes = {
   '/search-history': 'search-history',
   '/theme': 'theme',
   '/admin': 'admin',
+  '/terms': 'terms',
+  '/privacy': 'privacy',
+  '/tokushoho': 'tokushoho',
+  '/contact': 'contact',
 };
 
-// Simple auth state
+// ============================================================
+// Helpers — HTML escaping, cookies, unified API client
+// ============================================================
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// escapeHtml + convert newlines to <br> (for multi-line user text)
+function escapeHtmlMultiline(str) {
+  return escapeHtml(str).replace(/\n/g, '<br>');
+}
+
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)'));
+  return m ? decodeURIComponent(m[2]) : '';
+}
+
+// Unified fetch: always sends the session cookie, and attaches the CSRF token
+// for unsafe methods so Django's SessionAuthentication accepts them.
+async function apiFetch(url, options = {}) {
+  const opts = { credentials: 'include', ...options };
+  const method = (opts.method || 'GET').toUpperCase();
+  opts.headers = { ...(options.headers || {}) };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    opts.headers['X-CSRFToken'] = getCookie('csrftoken');
+  }
+  return fetch(url, opts);
+}
+
+// ============================================================
+// Auth state — derived solely from the server session, never persisted
+// ============================================================
 let isLoggedIn = false;
-let currentUser = { name: '', email: '' };
+let currentUser = { name: '', email: '', isStaff: false };
 
-function saveAuth() {
-  localStorage.setItem('izakaya_auth', JSON.stringify({ isLoggedIn, currentUser }));
+function setAuthFromApi(data) {
+  isLoggedIn = true;
+  currentUser = {
+    name: (data.profile && data.profile.display_name) || data.username || data.email || '',
+    email: data.email || '',
+    isStaff: !!data.is_staff,
+  };
 }
 
-function loadAuth() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('izakaya_auth') || 'null');
-    if (saved && saved.isLoggedIn) {
-      isLoggedIn = true;
-      currentUser = saved.currentUser;
-      loadUserData();
-    }
-  } catch(e) { console.error('loadAuth error', e); }
-}
-
-loadAuth();
-
-// ============================================================
-// Data Storage
-// - Favorites: per-user
-// - Visit count & Rating: per-user
-// - Comments: SHARED across all users (each comment has authorEmail)
-// ============================================================
-let favorites = [];
-let userShopData = {};  // { shopId: { rating, visitCount } }
-let allComments = {};   // SHARED { shopId: [{ id, text, createdAt, author, authorEmail }] }
-
-// Load shared comments (always available)
-allComments = JSON.parse(localStorage.getItem('izakaya_comments') || '{}');
-
+// Per-user localStorage key (still used for the search-history convenience log)
 function getUserStorageKey(base) {
   return `${base}_${currentUser.email || 'anonymous'}`;
 }
 
-function loadUserData() {
-  favorites = JSON.parse(localStorage.getItem(getUserStorageKey('izakaya_favorites')) || '[]');
-  userShopData = JSON.parse(localStorage.getItem(getUserStorageKey('izakaya_userdata')) || '{}');
+// ============================================================
+// User data — kept in memory, persisted on the backend
+// - favorites: per-user       (GET/POST/DELETE /favorites/)
+// - visit counts: per-user    (GET/POST /visits/)
+// - comments: shared per shop (GET/POST /comments/<shopId>/)
+// ============================================================
+let favorites = [];        // [{ id, name, photo, genre, ..., addedAt }]
+let userShopData = {};     // { shopId: { visitCount, shop } }
+
+// Convert a backend Shop payload into the shape the UI renders.
+function shopFromApi(s) {
+  if (!s) return null;
+  return {
+    id: s.hotpepper_id,
+    name: s.name,
+    photo: s.photo_url,
+    genre: s.genre,
+    budget: s.budget,
+    address: s.address,
+    lat: s.lat,
+    lng: s.lng,
+    url: s.url,
+    open: s.open_hours,
+  };
+}
+
+async function loadUserData() {
+  if (!isLoggedIn) { favorites = []; userShopData = {}; return; }
+  try {
+    const [favRes, visitRes] = await Promise.all([
+      apiFetch('/api/restaurants/favorites/'),
+      apiFetch('/api/restaurants/visits/'),
+    ]);
+    if (favRes.ok) {
+      const data = await favRes.json();
+      favorites = data.map(f => {
+        const shop = shopFromApi(f.shop) || {};
+        return { ...shop, addedAt: new Date(f.created_at).getTime() || 0 };
+      });
+    }
+    if (visitRes.ok) {
+      const data = await visitRes.json();
+      userShopData = {};
+      data.forEach(v => {
+        const shop = shopFromApi(v.shop);
+        if (shop) userShopData[shop.id] = { visitCount: v.visit_count, shop };
+      });
+    }
+  } catch (e) {
+    console.warn('loadUserData failed', e);
+  }
 }
 
 function clearUserData() {
@@ -70,55 +138,153 @@ function clearUserData() {
   userShopData = {};
 }
 
-function saveFavorites() {
-  localStorage.setItem(getUserStorageKey('izakaya_favorites'), JSON.stringify(favorites));
-}
-function saveUserData() {
-  localStorage.setItem(getUserStorageKey('izakaya_userdata'), JSON.stringify(userShopData));
-}
-function saveComments() {
-  localStorage.setItem('izakaya_comments', JSON.stringify(allComments));
-}
-
 function getUserData(shopId) {
   if (!userShopData[shopId]) {
-    userShopData[shopId] = { rating: 0, visitCount: 0 };
+    userShopData[shopId] = { visitCount: 0, shop: null };
   }
   return userShopData[shopId];
 }
 
-function getShopComments(shopId) {
-  if (!allComments[shopId]) {
-    allComments[shopId] = [];
-  }
-  return allComments[shopId];
-}
-
-
-// Compatibility wrapper: getReview returns a combined view
-
-// Compatibility wrapper: getReview returns a combined view
+// Compatibility wrapper kept for the render functions
 function getReview(shopId) {
-  const ud = getUserData(shopId);
-  const comments = getShopComments(shopId);
-  return { rating: ud.rating, visitCount: ud.visitCount, comments };
+  const ud = userShopData[shopId] || { visitCount: 0 };
+  return { visitCount: ud.visitCount || 0 };
 }
-function saveReviews() {
-  saveUserData();
-  saveComments();
+
+// Persist a visit count to the backend
+async function saveVisit(shop, count) {
+  const ud = getUserData(shop.id);
+  ud.visitCount = count;
+  ud.shop = ud.shop || shop;
+  if (!isLoggedIn) return;
+  try {
+    await apiFetch('/api/restaurants/visits/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shop, visit_count: count }),
+    });
+  } catch (e) { console.warn('saveVisit failed', e); }
 }
 
 function isFavorite(shopId) {
   return favorites.some(f => f.id === shopId);
 }
 
-function toggleFavorite(shop) {
+// Add/remove a favorite — updates memory immediately, then syncs to the backend.
+async function toggleFavorite(shop) {
+  if (!isLoggedIn) return;
   if (isFavorite(shop.id)) {
-    favorites = favorites.filter(f => f.id !== shop.id);
+    await removeFavorite(shop.id);
   } else {
     favorites.push({ ...shop, addedAt: Date.now() });
+    try {
+      await apiFetch('/api/restaurants/favorites/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shop }),
+      });
+    } catch (e) { console.warn('favorite add failed', e); }
   }
-  saveFavorites();
+}
+
+async function removeFavorite(shopId) {
+  favorites = favorites.filter(f => f.id !== shopId);
+  if (!isLoggedIn) return;
+  try {
+    await apiFetch('/api/restaurants/favorites/', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shop_id: shopId }),
+    });
+  } catch (e) { console.warn('favorite remove failed', e); }
+}
+
+// ============================================================
+// Impressions & Recommendations
+// - impressions: which shops the user was shown (a signal for recommendations)
+// - recommendations: revisit / discovery / popular, rendered on the home page
+// ============================================================
+
+// Shops already counted as "shown" this session — avoids double-counting
+// the same shop on re-sort / pagination.
+const recordedImpressionIds = new Set();
+
+async function recordImpressions(shops) {
+  if (!isLoggedIn || !Array.isArray(shops) || !shops.length) return;
+  const fresh = shops.filter(s => s && s.id && !recordedImpressionIds.has(s.id));
+  if (!fresh.length) return;
+  fresh.forEach(s => recordedImpressionIds.add(s.id));
+  try {
+    await apiFetch('/api/restaurants/impressions/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shops: fresh }),
+    });
+  } catch (e) { console.warn('recordImpressions failed', e); }
+}
+
+// Fetch personalized recommendations and render them on the home page.
+async function loadRecommendations() {
+  const section = document.getElementById('recommendations-section');
+  if (!section) return;
+  let url = '/api/restaurants/recommendations/';
+  if (state.lat && state.lng) {
+    url += `?lat=${encodeURIComponent(state.lat)}&lng=${encodeURIComponent(state.lng)}`;
+  }
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) return;
+    renderRecommendations(await res.json());
+  } catch (e) { console.warn('loadRecommendations failed', e); }
+}
+
+function recoCardHTML(shop) {
+  const eId = escapeHtml(shop.id);
+  const eName = escapeHtml(shop.name);
+  const eImg = escapeHtml(shop.photo || PLACEHOLDER_IMG);
+  return `
+    <div class="reco-card glass-card-subtle" data-shop-id="${eId}">
+      <img src="${eImg}" alt="${eName}" class="reco-card-img" loading="lazy"
+        onerror="this.onerror=null;this.src='${PLACEHOLDER_IMG}'" />
+      <div class="reco-card-body">
+        <h3 class="reco-card-name">${eName}</h3>
+        ${shop.genre ? `<span class="meta-badge reco-genre">${escapeHtml(shop.genre)}</span>` : ''}
+        ${shop.reason ? `<p class="reco-card-reason"><span class="material-icons-round">auto_awesome</span>${escapeHtml(shop.reason)}</p>` : ''}
+        ${shop.is_hotpepper ? `<div class="reco-card-tags"><span class="ext-rating hotpepper"><span class="hp-letter">H</span>HotPepper掲載</span></div>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderRecommendations(data) {
+  const section = document.getElementById('recommendations-section');
+  if (!section || !data) return;
+
+  const revisit = data.revisit || [];
+  const discovery = data.discovery || [];
+  const popular = data.popular || [];
+
+  // Flat list so the detail page can resolve a recommended shop by id
+  state.recommendations = [...revisit, ...discovery, ...popular];
+
+  const fillBlock = (blockId, listId, shops) => {
+    const block = document.getElementById(blockId);
+    const list = document.getElementById(listId);
+    if (!block || !list) return;
+    if (!shops.length) { block.hidden = true; return; }
+    list.innerHTML = shops.map(recoCardHTML).join('');
+    block.hidden = false;
+    list.querySelectorAll('.reco-card').forEach(card => {
+      card.addEventListener('click', () => {
+        location.hash = `#/detail/${card.dataset.shopId}`;
+      });
+    });
+  };
+
+  fillBlock('reco-discovery-block', 'reco-discovery-list', discovery);
+  fillBlock('reco-revisit-block', 'reco-revisit-list', revisit);
+  fillBlock('reco-popular-block', 'reco-popular-list', popular);
+
+  section.classList.toggle('hidden', state.recommendations.length === 0);
 }
 
 // ============================================================
@@ -172,6 +338,11 @@ function navigateTo(hash) {
   if (pageId === 'admin') {
     setTimeout(() => renderAdminStats(), 50);
   }
+  // Refresh recommendations on every home visit so they reflect the latest
+  // visits / favorites / impressions the user just recorded.
+  if (pageId === 'home') {
+    setTimeout(() => loadRecommendations(), 50);
+  }
 
   // Hide all pages
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -219,11 +390,22 @@ const state = {
   budgets: [],
   isLocationReady: false,
   searchResults: [],
+  recommendations: [], // flat list of all recommended shops (for detail-page lookup)
   currentPage: 1,
   perPage: 10,
   locationMode: 'gps', // 'gps' or 'station'
   lastScrollPosition: 0
 };
+
+// Inline SVG placeholder — used when a shop has no photo
+const PLACEHOLDER_IMG =
+  'data:image/svg+xml;charset=utf-8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120">' +
+    '<rect width="100%" height="100%" fill="#22222e"/>' +
+    '<text x="50%" y="50%" fill="#7a7a90" font-size="14" font-family="sans-serif" ' +
+    'text-anchor="middle" dy=".3em">No Image</text></svg>'
+  );
 
 // ============================================================
 // Fallback Data
@@ -240,23 +422,25 @@ const FALLBACK_GENRES = [
   { code: 'G012', name: 'その他グルメ' },
 ];
 
-const FALLBACK_BUDGETS = [
-  { code: 'B010', name: '1,000円' },
-  { code: 'B001', name: '2,000円' },
-  { code: 'B002', name: '3,000円' },
-  { code: 'B003', name: '4,000円' },
-  { code: 'B008', name: '5,000円' },
-  { code: 'B004', name: '7,000円' },
-  { code: 'B005', name: '10,000円' },
-  { code: 'B012', name: '20,000円' },
-  { code: 'B013', name: '30,000円' },
-];
-
-// Allowed budget upper-limit values (in yen) matching HotPepper API ranges
-const ALLOWED_BUDGET_VALUES = [
-  500, 1000, 1500, 2000, 3000, 4000, 5000, 7000,
-  10000, 15000, 20000, 30000
-];
+// Map a free-form yen upper-limit to the nearest HotPepper budget code.
+// The codes are ordered to match `all_codes` in the backend's combined search.
+function yenToBudgetCode(yen) {
+  const y = parseInt(String(yen).replace(/[^0-9]/g, ''), 10);
+  if (isNaN(y) || y <= 0) return '';
+  if (y <= 500) return 'B009';
+  if (y <= 1000) return 'B010';
+  if (y <= 1500) return 'B011';
+  if (y <= 2000) return 'B001';
+  if (y <= 3000) return 'B002';
+  if (y <= 4000) return 'B003';
+  if (y <= 5000) return 'B008';
+  if (y <= 7000) return 'B004';
+  if (y <= 10000) return 'B005';
+  if (y <= 15000) return 'B006';
+  if (y <= 20000) return 'B012';
+  if (y <= 30000) return 'B013';
+  return 'B014';
+}
 
 // ============================================================
 // DOM Elements
@@ -267,8 +451,7 @@ const btnSearch = document.getElementById('search-btn');
 const loaderSearch = document.getElementById('search-loader');
 const btnText = document.querySelector('.btn-text');
 const genreSelect = document.getElementById('genre-select');
-const budgetMinSelect = document.getElementById('budget-min-select');
-const budgetMaxSelect = document.getElementById('budget-max-select');
+const budgetMaxInput = document.getElementById('budget-max-input');
 const searchForm = document.getElementById('search-form');
 const resultsSection = document.getElementById('results-section');
 const resultsContainer = document.getElementById('results-container');
@@ -292,25 +475,38 @@ setInterval(nextSlide, 5000);
 // App Initialization
 // ============================================================
 async function init() {
-  initThreeBackground();
+  // prefers-reduced-motion を尊重 (省電力 / アクセシビリティ)
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!reduceMotion) {
+    initThreeBackground();
+  } else {
+    const canvas = document.getElementById('three-canvas');
+    if (canvas) canvas.style.display = 'none';
+  }
 
-  // Verify session with server on startup
+  // Service Worker 登録 (PWA)
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('/service-worker.js').catch((err) => {
+      console.warn('SW register failed', err);
+    });
+  }
+
+  // Verify session with the server on startup (the server session is the
+  // only source of truth — auth state is never persisted client-side).
   try {
-    const res = await fetch('/api/restaurants/me/', { credentials: 'include' });
+    const res = await apiFetch('/api/restaurants/auth/me/');
     if (res.ok) {
       const data = await res.json();
-      isLoggedIn = true;
-      currentUser = { name: data.display_name || data.username, email: data.email };
-      saveAuth();
+      setAuthFromApi(data);
+      await loadUserData();
     }
-  } catch(e) { console.warn('Session check failed', e); }
+  } catch (e) { console.warn('Session check failed', e); }
 
-  loadAuth();
   updateAuthUI();
   updateProfileDisplay();
 
-  navigateTo(location.hash || '#/');
-  await Promise.all([fetchGenres(), fetchBudgets()]);
+  navigateTo(location.hash || '#/');  // home route triggers loadRecommendations()
+  await fetchGenres();
   setupLocationToggle();
   requestLocation();
 
@@ -332,21 +528,19 @@ async function init() {
       const password = passwordInput ? passwordInput.value : '';
 
       try {
-        const res = await fetch('/api/restaurants/auth/login/', {
+        const res = await apiFetch('/api/restaurants/auth/login/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password }),
-          credentials: 'include'
         });
         const data = await res.json();
 
         if (res.ok) {
-          isLoggedIn = true;
-          currentUser = { name: data.display_name || data.username, email: data.email };
-          saveAuth();
-          loadUserData();
+          setAuthFromApi(data);
+          await loadUserData();
           updateProfileDisplay();
           updateAuthUI();
+          loadRecommendations();
           location.hash = '#/';
         } else {
           if (data.error === 'user_not_found') {
@@ -371,29 +565,34 @@ async function init() {
       const nameInput = document.getElementById('register-name');
       const emailInput = document.getElementById('register-email');
       const passwordInput = document.getElementById('register-password');
+      const agreeInput = document.getElementById('register-agree');
       const display_name = nameInput ? nameInput.value : '';
       const email = emailInput ? emailInput.value : '';
       const password = passwordInput ? passwordInput.value : '';
+      const agree_terms = !!(agreeInput && agreeInput.checked);
+
+      if (!agree_terms) {
+        alert('利用規約とプライバシーポリシーへの同意が必要です。');
+        return;
+      }
 
       try {
-        const res = await fetch('/api/restaurants/auth/register/', {
+        const res = await apiFetch('/api/restaurants/auth/register/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, display_name }),
-          credentials: 'include'
+          body: JSON.stringify({ email, password, display_name, agree_terms }),
         });
         const data = await res.json();
         if (res.ok) {
-          isLoggedIn = true;
-          currentUser = { name: data.display_name || data.username, email: data.email };
-          saveAuth();
-          loadUserData();
+          setAuthFromApi(data);
+          await loadUserData();
           updateProfileDisplay();
           updateAuthUI();
+          loadRecommendations();
           alert('登録が完了しました！');
           location.hash = '#/';
         } else {
-          alert(data.error || '登録に失敗しました');
+          alert(data.message || data.error || '登録に失敗しました');
         }
       } catch (err) {
         console.error('Register error:', err);
@@ -402,23 +601,8 @@ async function init() {
     });
   }
 
-  // Google login button
-  const googleBtn = document.querySelector('.google-btn');
-  if (googleBtn) {
-    googleBtn.addEventListener('click', () => {
-      // Simulated Google OAuth - in production, use real Google Sign-In
-      const googleEmail = prompt('Googleアカウントのメールアドレスを入力:', '');
-      if (!googleEmail) return;
-      const userName = googleEmail.split('@')[0];
-      isLoggedIn = true;
-      currentUser = { name: userName, email: googleEmail };
-      saveAuth();
-      loadUserData();
-      updateProfileDisplay();
-      updateAuthUI();
-      location.hash = '#/';
-    });
-  }
+  // Note: the fake "Google login" (a prompt() that trusted any email) has been
+  // removed. Real Google OAuth can be added here later.
 
   // Password toggle
   const passwordToggle = document.getElementById('password-toggle');
@@ -435,13 +619,52 @@ async function init() {
   // Logout button
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/restaurants/auth/logout/', { method: 'POST' });
+      } catch (e) { console.warn('Logout request failed', e); }
       isLoggedIn = false;
-      currentUser = { name: '', email: '' };
-      saveAuth();
+      currentUser = { name: '', email: '', isStaff: false };
       clearUserData();
+      recordedImpressionIds.clear();
       updateAuthUI();
+      updateProfileDisplay();
+      loadRecommendations();
       location.hash = '#/login';
+    });
+  }
+
+  // Delete account button (退会)
+  const deleteAccountBtn = document.getElementById('delete-account-btn');
+  if (deleteAccountBtn) {
+    deleteAccountBtn.addEventListener('click', async () => {
+      const confirmed = window.prompt(
+        '退会するとすべてのデータが削除されます。\n本当に退会する場合は「DELETE」と入力してください。'
+      );
+      if (confirmed !== 'DELETE') return;
+      try {
+        const res = await apiFetch('/api/restaurants/auth/delete/', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: 'DELETE' }),
+        });
+        if (res.ok) {
+          isLoggedIn = false;
+          currentUser = { name: '', email: '', isStaff: false };
+          clearUserData();
+          recordedImpressionIds.clear();
+          updateAuthUI();
+          updateProfileDisplay();
+          alert('退会が完了しました。ご利用ありがとうございました。');
+          location.hash = '#/';
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.message || '退会に失敗しました。');
+        }
+      } catch (e) {
+        console.error('Delete account failed', e);
+        alert('通信エラーが発生しました。');
+      }
     });
   }
 
@@ -453,18 +676,31 @@ async function init() {
     });
   }
 
-  // Profile edit form
+  // Profile edit form — persists the display name to the backend.
+  // (Email is not editable; the backend identifies the account by it.)
   const profileEditForm = document.getElementById('profile-edit-form');
   if (profileEditForm) {
-    profileEditForm.addEventListener('submit', (e) => {
+    profileEditForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const nameInput = document.getElementById('edit-name');
-      const emailInput = document.getElementById('edit-email');
-      if (nameInput && emailInput) {
-        currentUser.name = nameInput.value;
-        currentUser.email = emailInput.value;
-        updateProfileDisplay();
-        location.hash = '#/mypage';
+      if (!nameInput) return;
+      try {
+        const res = await apiFetch('/api/restaurants/auth/profile/', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: nameInput.value }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAuthFromApi(data);
+          updateProfileDisplay();
+          location.hash = '#/mypage';
+        } else {
+          alert('プロフィールの更新に失敗しました');
+        }
+      } catch (err) {
+        console.error('Profile update error:', err);
+        alert('通信エラーが発生しました');
       }
     });
   }
@@ -518,10 +754,10 @@ function updateAuthUI() {
     navigateTo(currentHash);
   }
 
-  // Show/Hide admin nav
+  // Show/Hide admin nav — driven by the server-provided is_staff flag
   const adminNav = document.getElementById('admin-nav');
   if (adminNav) {
-    if (isLoggedIn && currentUser.email === 'test@gmail.com') {
+    if (isLoggedIn && currentUser.isStaff) {
       adminNav.classList.remove('hidden');
     } else {
       adminNav.classList.add('hidden');
@@ -564,52 +800,6 @@ async function fetchGenres() {
   populateSelect(genreSelect, FALLBACK_GENRES, 'code', 'name');
 }
 
-function extractBudgetValue(name) {
-  // Extract the upper limit value from budget name
-  const rangeMatch = name.match(/([0-9,]+)[〜～]([0-9,]+)円/);
-  if (rangeMatch) {
-    return parseInt(rangeMatch[2].replace(/,/g, ''));
-  }
-  const manMatch = name.match(/(\d+)万円/);
-  if (manMatch) {
-    return parseInt(manMatch[1]) * 10000;
-  }
-  const simpleMatch = name.match(/([0-9,]+)円/);
-  if (simpleMatch) {
-    return parseInt(simpleMatch[1].replace(/,/g, ''));
-  }
-  return 0;
-}
-
-async function fetchBudgets() {
-  try {
-    const res = await fetch('/api/restaurants/budgets/');
-    const data = await res.json();
-    if (data.results && data.results.length > 0) {
-      // Filter: only allowed values (1000円 increments, 10000円+ in 10000 increments, max 30000)
-      // HotPepper API returns ranges like "501〜1000円", "2001〜3000円", etc.
-      // We check if the upper limit of the range is in our allowed values
-      state.budgets = data.results.filter(b => {
-        const val = extractBudgetValue(b.name);
-        // Allow exact matches or range upper limits that match
-        return ALLOWED_BUDGET_VALUES.includes(val);
-      });
-      // If API filtering removed too many, use fallback
-      if (state.budgets.length < 5) {
-        state.budgets = FALLBACK_BUDGETS;
-      }
-      populateBudgetSelect(budgetMinSelect, state.budgets);
-      populateBudgetSelect(budgetMaxSelect, state.budgets);
-      return;
-    }
-  } catch (error) {
-    console.warn('API unavailable, using fallback budgets');
-  }
-  state.budgets = FALLBACK_BUDGETS;
-  populateBudgetSelect(budgetMinSelect, FALLBACK_BUDGETS);
-  populateBudgetSelect(budgetMaxSelect, FALLBACK_BUDGETS);
-}
-
 function populateSelect(selectElement, items, valueKey, labelKey) {
   if (!selectElement) return;
   while (selectElement.options.length > 1) {
@@ -641,19 +831,6 @@ function formatBudgetName(rawName) {
   return rawName;
 }
 
-function populateBudgetSelect(selectElement, items) {
-  if (!selectElement) return;
-  while (selectElement.options.length > 1) {
-    selectElement.remove(1);
-  }
-  items.forEach(item => {
-    const option = document.createElement('option');
-    option.value = item.code || item.name;
-    option.textContent = formatBudgetName(item.name);
-    selectElement.appendChild(option);
-  });
-}
-
 // ============================================================
 // Geolocation
 // ============================================================
@@ -667,6 +844,9 @@ function requestLocation() {
         locationIndicator.className = 'status-indicator success';
         locationText.textContent = '現在地を取得しました';
         if (state.locationMode === 'gps') btnSearch.disabled = false;
+        // Re-fetch recommendations now that we have coordinates (enables the
+        // hybrid fresh-search fallback for the "discovery" block).
+        loadRecommendations();
       },
       (error) => {
         console.warn('Geolocation error:', error);
@@ -701,8 +881,8 @@ searchForm.addEventListener('submit', async (e) => {
 
   const formData = new FormData(searchForm);
   const genre = formData.get('genre');
-  const budgetMin = formData.get('budget_min');
-  const budgetMax = formData.get('budget_max');
+  const budgetMaxYen = (formData.get('budget_max') || '').trim();
+  const budgetMaxCode = yenToBudgetCode(budgetMaxYen);
   const keyword = formData.get('keyword');
   const people = formData.get('people');
   const freeDrink = formData.get('free_drink');
@@ -730,8 +910,7 @@ searchForm.addEventListener('submit', async (e) => {
 
   // Add filters
   if (genre) searchParams.append('genre', genre);
-  if (budgetMin) searchParams.append('budget_min', budgetMin);
-  if (budgetMax) searchParams.append('budget_max', budgetMax);
+  if (budgetMaxCode) searchParams.append('budget_max', budgetMaxCode);
   if (people) searchParams.append('people', people);
   if (freeDrink) searchParams.append('free_drink', 'true');
   if (freeFood) searchParams.append('free_food', 'true');
@@ -748,7 +927,7 @@ searchForm.addEventListener('submit', async (e) => {
       lng: state.lng,
       // 既存のフィルタをコンテキストとして送信
       current_genre: genre ? genreSelect.options[genreSelect.selectedIndex].text : null,
-      current_budget_max: budgetMax ? budgetMaxSelect.options[budgetMaxSelect.selectedIndex].text : null,
+      current_budget_max: budgetMaxYen ? `${budgetMaxYen}円` : null,
       current_people: people || null,
       current_free_drink: !!freeDrink,
       current_free_food: !!freeFood
@@ -775,7 +954,7 @@ searchForm.addEventListener('submit', async (e) => {
         mode: state.locationMode,
         keyword: state.locationMode === 'station' ? (document.getElementById('station-input')?.value || '') : '',
         genre: genre ? (genreSelect?.options[genreSelect.selectedIndex]?.text || '') : '',
-        budget: budgetMax ? (budgetMaxSelect?.options[budgetMaxSelect.selectedIndex]?.text || '') : '',
+        budget: budgetMaxYen ? `${budgetMaxYen}円` : '',
         resultCount: data.shops.length,
         timestamp: Date.now()
       });
@@ -847,21 +1026,26 @@ function renderResults(shops) {
     const review = getReview(shop.id);
     const visitBadge = isLoggedIn ? `<span class="visit-badge">${review.visitCount}回来店</span>` : '';
 
+    // Escape every value that originates from the API or user input
+    const eId = escapeHtml(shop.id);
+    const eName = escapeHtml(shop.name);
+    const eImg = escapeHtml(imgUrl);
+
     // Only show favorite button when logged in
     const favBtnHTML = isLoggedIn ? `
-          <button class="fav-btn ${favClass}" data-shop-id="${shop.id}" title="お気に入り">
+          <button class="fav-btn ${favClass}" data-shop-id="${eId}" title="お気に入り">
             <span class="material-icons-round">${isFavorite(shop.id) ? 'favorite' : 'favorite_border'}</span>
           </button>` : '';
 
     const cardHTML = `
-      <div class="result-card glass-card-subtle" style="animation-delay: ${index * 0.05}s" data-shop-id="${shop.id}">
+      <div class="result-card glass-card-subtle" style="animation-delay: ${index * 0.05}s" data-shop-id="${eId}">
         <div class="card-img-container">
-          <img src="${imgUrl}" alt="${shop.name}" class="card-img" loading="lazy" />
+          <img src="${eImg}" alt="${eName}" class="card-img" loading="lazy" />
           ${favBtnHTML}
           ${review.visitCount > 0 ? `<div class="visit-overlay"><span class="material-icons-round">check_circle</span></div>` : ''}
         </div>
         <div class="card-body">
-          <h3 class="card-title">${shop.name}</h3>
+          <h3 class="card-title">${eName}</h3>
           <div class="card-rating-row">
             ${visitBadge}
           </div>
@@ -870,7 +1054,7 @@ function renderResults(shops) {
             ${shop.ai_reason ? `
               <div class="ai-reason-badge">
                 <span class="material-icons-round">auto_awesome</span>
-                <p>${shop.ai_reason}</p>
+                <p>${escapeHtml(shop.ai_reason)}</p>
               </div>
             ` : ''}
 
@@ -889,16 +1073,16 @@ function renderResults(shops) {
           </div>
 
           <div class="card-meta">
-            ${shop.genre ? `<span class="meta-badge">${shop.genre}</span>` : ''}
-            ${shop.budget ? `<span class="meta-badge">${formatBudgetName(shop.budget)}</span>` : ''}
+            ${shop.genre ? `<span class="meta-badge">${escapeHtml(shop.genre)}</span>` : ''}
+            ${shop.budget ? `<span class="meta-badge">${escapeHtml(formatBudgetName(shop.budget))}</span>` : ''}
           </div>
 
           <div class="card-distance">
             <span class="material-icons-round" style="font-size: 14px;">place</span>
-            ${shop.distance_km ? `ここから徒歩 約${shop.walk_time_min}分 (${shop.distance_km}km)` : (shop.address || '')}
+            ${shop.distance_km ? `ここから徒歩 約${escapeHtml(shop.walk_time_min)}分 (${escapeHtml(shop.distance_km)}km)` : escapeHtml(shop.address || '')}
           </div>
           <div class="card-actions">
-            <button class="btn detail-btn" data-shop-id="${shop.id}">
+            <button class="btn detail-btn" data-shop-id="${eId}">
               <span class="material-icons-round">info</span>
               <span>詳細を見る</span>
             </button>
@@ -954,6 +1138,9 @@ function renderResults(shops) {
     });
   });
 
+  // Record the shops on this page as "shown" — feeds the recommendation engine
+  recordImpressions(pageShops);
+
   resultsSection.classList.remove('hidden');
   setTimeout(() => {
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -967,8 +1154,9 @@ function renderDetailPage(shopId) {
   const container = document.getElementById('detail-content');
   if (!container) return;
 
-  // Find shop from search results or favorites
+  // Find shop from search results, recommendations, or favorites
   const shop = (state.searchResults || []).find(s => s.id === shopId)
+    || (state.recommendations || []).find(s => s.id === shopId)
     || favorites.find(s => s.id === shopId);
 
   if (!shop) {
@@ -982,19 +1170,24 @@ function renderDetailPage(shopId) {
 
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shop.name + ' ' + (shop.address || ''))}`;
 
+  // Escape every value that originates from the API or user input
+  const eName = escapeHtml(shop.name);
+  const eImg = escapeHtml(imgUrl);
+  const eId = escapeHtml(shopId);
+
   container.innerHTML = `
     <div class="detail-hero">
-      <img src="${imgUrl}" alt="${shop.name}" class="detail-hero-img" />
+      <img src="${eImg}" alt="${eName}" class="detail-hero-img" />
       ${isLoggedIn ? `<button class="fav-btn-detail ${isFavorite(shopId) ? 'active' : ''}" id="detail-fav-btn">
         <span class="material-icons-round">${isFavorite(shopId) ? 'favorite' : 'favorite_border'}</span>
       </button>` : ''}
     </div>
 
     <div class="detail-info glass-card">
-      <h2 class="detail-name">${shop.name}</h2>
+      <h2 class="detail-name">${eName}</h2>
       <div class="detail-meta">
-        ${shop.genre ? `<span class="meta-badge">${shop.genre}</span>` : ''}
-        ${shop.budget ? `<span class="meta-badge">${formatBudgetName(shop.budget)}</span>` : ''}
+        ${shop.genre ? `<span class="meta-badge">${escapeHtml(shop.genre)}</span>` : ''}
+        ${shop.budget ? `<span class="meta-badge">${escapeHtml(formatBudgetName(shop.budget))}</span>` : ''}
       </div>
 
       <div class="card-external-ratings" style="margin: 0.8rem 0 1.2rem 0;">
@@ -1012,13 +1205,13 @@ function renderDetailPage(shopId) {
 
       <div class="detail-address">
         <span class="material-icons-round">place</span>
-        <span>${shop.address || '住所情報なし'}</span>
+        <span>${escapeHtml(shop.address || '住所情報なし')}</span>
       </div>
-      ${shop.open ? `<div class="detail-open"><span class="material-icons-round">schedule</span><span>${shop.open}</span></div>` : ''}
+      ${shop.open ? `<div class="detail-open"><span class="material-icons-round">schedule</span><span>${escapeHtml(shop.open)}</span></div>` : ''}
       <div class="detail-links">
-        ${shop.source === 'hotpepper' && shop.url ? `<a href="${shop.url}" target="_blank" class="detail-link"><span class="material-icons-round">open_in_new</span>HotPepperで見る</a>` : ''}
-        <a href="${googleMapsUrl}" target="_blank" class="detail-link detail-link-map"><span class="material-icons-round">map</span>Googleマップで見る</a>
-        <button class="detail-link share-btn" id="share-btn" data-shop-id="${shopId}">
+        ${shop.source === 'hotpepper' && shop.url ? `<a href="${escapeHtml(shop.url)}" target="_blank" rel="noopener" class="detail-link"><span class="material-icons-round">open_in_new</span>HotPepperで見る</a>` : ''}
+        <a href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener" class="detail-link detail-link-map"><span class="material-icons-round">map</span>Googleマップで見る</a>
+        <button class="detail-link share-btn" id="share-btn" data-shop-id="${eId}">
           <span class="material-icons-round">share</span>シェア
         </button>
       </div>
@@ -1098,7 +1291,7 @@ function renderDetailPage(shopId) {
     visitMinusBtn.addEventListener('click', () => {
       const ud = getUserData(shopId);
       if (ud.visitCount > 0) ud.visitCount--;
-      saveUserData();
+      saveVisit(shop, ud.visitCount);
       document.getElementById('visit-count').textContent = ud.visitCount;
       updateSearchCardVisitCount(shopId);
     });
@@ -1108,58 +1301,94 @@ function renderDetailPage(shopId) {
     visitPlusBtn.addEventListener('click', () => {
       const ud = getUserData(shopId);
       ud.visitCount++;
-      saveUserData();
+      saveVisit(shop, ud.visitCount);
       document.getElementById('visit-count').textContent = ud.visitCount;
       updateSearchCardVisitCount(shopId);
     });
   }
 
-  // Rating slider removed
+  // ----- Comments (persisted on the backend, shared per shop) -----
+  let shopComments = [];
 
-  // Comments system
-  function renderComments() {
-    const comments = getShopComments(shopId);
+  function formatCommentDate(ts) {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+
+  function closeAllDropdowns() {
+    document.querySelectorAll('.comment-dropdown').forEach(d => d.classList.remove('open'));
+  }
+
+  function renderCommentsList() {
     const list = document.getElementById('comments-list');
     if (!list) return;
-    if (comments.length === 0) {
+    if (shopComments.length === 0) {
       list.innerHTML = '<p class="no-comments-msg">まだコメントがありません</p>';
       return;
     }
-    list.innerHTML = comments.map(c => {
-      const authorName = c.author || '匿名';
-      const isOwnComment = isLoggedIn && c.authorEmail === currentUser.email;
-      const authorHTML = c.author
-        ? `<a href="#/mypage" class="comment-author-link">${escapeHtml(authorName)}</a>`
-        : `<span class="comment-author-anon">${authorName}</span>`;
+    list.innerHTML = shopComments.map(c => {
+      const authorName = c.author_name || '匿名';
+      const isOwnComment = isLoggedIn && c.author_email && c.author_email === currentUser.email;
       const menuHTML = isOwnComment ? `
         <div class="comment-menu-wrap">
-          <button class="comment-menu-btn" data-id="${c.id}" title="メニュー">
+          <button class="comment-menu-btn" data-id="${escapeHtml(c.id)}" aria-label="メニュー">
             <span class="material-icons-round">more_horiz</span>
           </button>
-          <div class="comment-dropdown" id="dropdown-${c.id}">
-            <button class="dropdown-item edit-comment-btn" data-id="${c.id}">
+          <div class="comment-dropdown" id="dropdown-${escapeHtml(c.id)}">
+            <button class="dropdown-item edit-comment-btn" data-id="${escapeHtml(c.id)}">
               <span class="material-icons-round">edit</span>編集
             </button>
-            <button class="dropdown-item delete-comment-btn" data-id="${c.id}">
+            <button class="dropdown-item delete-comment-btn" data-id="${escapeHtml(c.id)}">
               <span class="material-icons-round">delete</span>削除
             </button>
           </div>
-        </div>` : '';
+        </div>` : `
+        <div class="comment-menu-wrap">
+          <button class="comment-menu-btn report-comment-btn" data-id="${escapeHtml(c.id)}" aria-label="このコメントを通報">
+            <span class="material-icons-round">flag</span>
+          </button>
+        </div>`;
       return `
-      <div class="comment-item" data-comment-id="${c.id}">
+      <div class="comment-item" data-comment-id="${escapeHtml(c.id)}">
         <div class="comment-content">
           <div class="comment-header">
-            ${authorHTML}
-            <span class="comment-date">${formatCommentDate(c.createdAt)}</span>
+            <span class="comment-author-anon">${escapeHtml(authorName)}</span>
+            <span class="comment-date">${escapeHtml(formatCommentDate(c.created_at))}</span>
           </div>
-          <p class="comment-text">${escapeHtml(c.text)}</p>
+          <p class="comment-text">${escapeHtmlMultiline(c.text)}</p>
         </div>
         ${menuHTML}
       </div>`;
     }).join('');
 
-    // Close all dropdowns when clicking outside
-    document.addEventListener('click', closeAllDropdowns, { once: true });
+    list.querySelectorAll('.report-comment-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const reason = window.prompt(
+          '通報理由を選択してください (spam / abuse / false / privacy / other):',
+          'abuse'
+        );
+        if (!reason) return;
+        try {
+          const res = await apiFetch(`/api/restaurants/comments/${id}/report/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          });
+          if (res.ok) {
+            alert('通報を受け付けました。確認後に対応します。');
+          } else {
+            const data = await res.json().catch(() => ({}));
+            alert(data.message || '通報に失敗しました');
+          }
+        } catch (err) {
+          console.error('Report failed', err);
+          alert('通信エラーが発生しました');
+        }
+      });
+    });
 
     list.querySelectorAll('.comment-menu-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -1167,7 +1396,7 @@ function renderDetailPage(shopId) {
         const id = btn.dataset.id;
         const dropdown = document.getElementById(`dropdown-${id}`);
         const isOpen = dropdown.classList.contains('open');
-        document.querySelectorAll('.comment-dropdown').forEach(d => d.classList.remove('open'));
+        closeAllDropdowns();
         if (!isOpen) {
           dropdown.classList.add('open');
           document.addEventListener('click', closeAllDropdowns, { once: true });
@@ -1179,78 +1408,104 @@ function renderDetailPage(shopId) {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
-        const comments = getShopComments(shopId);
-        const comment = comments.find(c => c.id === id);
+        const comment = shopComments.find(c => c.id === id);
         if (!comment) return;
         closeAllDropdowns();
-        // Show inline edit
         const commentItem = list.querySelector(`[data-comment-id="${id}"]`);
         commentItem.innerHTML = `
           <div class="comment-edit-area">
             <textarea class="text-input textarea-input comment-edit-ta" rows="2">${escapeHtml(comment.text)}</textarea>
             <div class="comment-edit-actions">
-              <button class="btn primary-btn btn-sm comment-save-edit" data-id="${id}"><span class="material-icons-round">save</span>保存</button>
+              <button class="btn primary-btn btn-sm comment-save-edit"><span class="material-icons-round">save</span>保存</button>
               <button class="btn btn-sm comment-cancel-edit"><span class="material-icons-round">close</span>キャンセル</button>
             </div>
           </div>
         `;
-        commentItem.querySelector('.comment-save-edit').addEventListener('click', () => {
+        commentItem.querySelector('.comment-save-edit').addEventListener('click', async () => {
           const newText = commentItem.querySelector('.comment-edit-ta').value.trim();
           if (!newText) return;
-          const comments2 = getShopComments(shopId);
-          const c = comments2.find(c => c.id === id);
-          if (c) { c.text = newText; c.editedAt = Date.now(); }
-          saveComments();
-          renderComments();
+          try {
+            const res = await apiFetch(`/api/restaurants/comments/detail/${id}/`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: newText }),
+            });
+            if (res.ok) {
+              await loadAndRenderComments();
+            } else {
+              alert('コメントの更新に失敗しました');
+            }
+          } catch (err) {
+            console.error('Comment update error:', err);
+            alert('通信エラーが発生しました');
+          }
         });
         commentItem.querySelector('.comment-cancel-edit').addEventListener('click', () => {
-          renderComments();
+          renderCommentsList();
         });
       });
     });
 
     list.querySelectorAll('.delete-comment-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
         closeAllDropdowns();
-        const comments = getShopComments(shopId);
-        allComments[shopId] = comments.filter(c => c.id !== id);
-        saveComments();
-        renderComments();
+        try {
+          const res = await apiFetch(`/api/restaurants/comments/detail/${id}/`, { method: 'DELETE' });
+          if (res.ok) {
+            await loadAndRenderComments();
+          } else {
+            alert('コメントの削除に失敗しました');
+          }
+        } catch (err) {
+          console.error('Comment delete error:', err);
+          alert('通信エラーが発生しました');
+        }
       });
     });
   }
 
-  function closeAllDropdowns() {
-    document.querySelectorAll('.comment-dropdown').forEach(d => d.classList.remove('open'));
+  async function loadAndRenderComments() {
+    try {
+      const res = await apiFetch(`/api/restaurants/comments/${encodeURIComponent(shopId)}/`);
+      shopComments = res.ok ? await res.json() : [];
+    } catch (err) {
+      console.warn('Failed to load comments', err);
+      shopComments = [];
+    }
+    renderCommentsList();
   }
 
-  function escapeHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;').replace(/\n/g,'<br>');
-  }
+  loadAndRenderComments();
 
-  function formatCommentDate(ts) {
-    const d = new Date(ts);
-    return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-  }
-
-  renderComments();
-
-  document.getElementById('add-comment-btn').addEventListener('click', () => {
+  document.getElementById('add-comment-btn').addEventListener('click', async () => {
     const ta = document.getElementById('detail-comment');
     const text = ta.value.trim();
     if (!text) return;
-    const comments = getShopComments(shopId);
-    const author = isLoggedIn ? currentUser.name : null;
-    const authorEmail = isLoggedIn ? currentUser.email : null;
-    comments.push({ id: Date.now(), text, createdAt: Date.now(), author, authorEmail });
-    saveComments();
-    ta.value = '';
-    renderComments();
     const btn = document.getElementById('add-comment-btn');
-    btn.querySelector('span:last-child').textContent = '投稿しました！';
-    setTimeout(() => { btn.querySelector('span:last-child').textContent = '投稿する'; }, 1500);
+    const label = btn.querySelector('span:last-child');
+    btn.disabled = true;
+    try {
+      const res = await apiFetch(`/api/restaurants/comments/${encodeURIComponent(shopId)}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, shop }),
+      });
+      if (res.ok) {
+        ta.value = '';
+        await loadAndRenderComments();
+        label.textContent = '投稿しました！';
+        setTimeout(() => { label.textContent = '投稿する'; }, 1500);
+      } else {
+        alert('コメントの投稿に失敗しました');
+      }
+    } catch (err) {
+      console.error('Comment post error:', err);
+      alert('通信エラーが発生しました');
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 
@@ -1288,12 +1543,14 @@ function renderFavorites() {
   sorted.forEach(shop => {
     const review = getReview(shop.id);
     const imgUrl = shop.photo || 'https://via.placeholder.com/80x80.png?text=No+Image';
+    const eId = escapeHtml(shop.id);
+    const eName = escapeHtml(shop.name);
 
     container.insertAdjacentHTML('beforeend', `
-      <div class="fav-card glass-card-subtle" data-shop-id="${shop.id}">
-        <img src="${imgUrl}" alt="${shop.name}" class="fav-card-img" />
+      <div class="fav-card glass-card-subtle" data-shop-id="${eId}">
+        <img src="${escapeHtml(imgUrl)}" alt="${eName}" class="fav-card-img" />
         <div class="fav-card-body">
-          <h3 class="fav-card-name">${shop.name}</h3>
+          <h3 class="fav-card-name">${eName}</h3>
           <div class="fav-card-meta">
             <span class="fav-visits">${review.visitCount}回来店</span>
           </div>
@@ -1310,13 +1567,13 @@ function renderFavorites() {
                  <span>HotPepper掲載</span>
               </div>` : ''}
           </div>
-          ${shop.genre ? `<span class="meta-badge" style="font-size: 0.7rem;">${shop.genre}</span>` : ''}
+          ${shop.genre ? `<span class="meta-badge" style="font-size: 0.7rem;">${escapeHtml(shop.genre)}</span>` : ''}
         </div>
         <div class="fav-card-actions">
-          <button class="icon-btn fav-detail-btn" data-shop-id="${shop.id}" title="詳細">
+          <button class="icon-btn fav-detail-btn" data-shop-id="${eId}" title="詳細">
             <span class="material-icons-round">chevron_right</span>
           </button>
-          <button class="icon-btn fav-remove-btn" data-shop-id="${shop.id}" title="削除">
+          <button class="icon-btn fav-remove-btn" data-shop-id="${eId}" title="削除">
             <span class="material-icons-round" style="color: var(--primary);">delete</span>
           </button>
         </div>
@@ -1331,9 +1588,8 @@ function renderFavorites() {
   });
 
   container.querySelectorAll('.fav-remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      favorites = favorites.filter(f => f.id !== btn.dataset.shopId);
-      saveFavorites();
+    btn.addEventListener('click', async () => {
+      await removeFavorite(btn.dataset.shopId);
       renderFavorites();
     });
   });
@@ -1450,14 +1706,16 @@ function showShareDialog(text, url) {
     <div class="share-dialog glass-card">
       <h3>シェア</h3>
       <p>以下のテキストをコピーしてシェアしてください：</p>
-      <textarea class="share-textarea" readonly>${text}</textarea>
+      <textarea class="share-textarea" readonly>${escapeHtml(text)}</textarea>
       <div class="share-dialog-buttons">
-        <button class="btn-secondary" onclick="this.closest('.share-dialog-overlay').remove()">閉じる</button>
-        <button class="btn-primary" onclick="copyShareText(this)">コピー</button>
+        <button class="btn-secondary share-close-btn">閉じる</button>
+        <button class="btn-primary">コピー</button>
       </div>
     </div>
   `;
   document.body.appendChild(dialog);
+
+  dialog.querySelector('.share-close-btn').addEventListener('click', () => dialog.remove());
 
   // コピー機能
   dialog.querySelector('.btn-primary').addEventListener('click', function() {
@@ -1474,35 +1732,41 @@ function showShareDialog(text, url) {
 // ============================================================
 // Mypage Stats
 // ============================================================
-function updateMypageStats() {
-  const favCount = favorites.length;
-  
-  // Review count: shops where THIS user has authored comments
-  let reviewCount = 0;
-  for (const shopId in allComments) {
-    const hasMyComment = allComments[shopId].some(c => c.authorEmail === currentUser.email);
-    if (hasMyComment) reviewCount++;
-  }
-  
-  // Visit count: shops where THIS user has visited
+async function updateMypageStats() {
+  const statFav = document.getElementById('stat-favorites');
+  const statRev = document.getElementById('stat-reviews');
+  const statVis = document.getElementById('stat-visits');
+
+  if (statFav) statFav.textContent = favorites.length;
+
+  // Visit count: shops the user has visited at least once
   let visitCount = 0;
   for (const shopId in userShopData) {
     if (userShopData[shopId].visitCount > 0) visitCount++;
   }
-  
-  const statFav = document.getElementById('stat-favorites');
-  const statRev = document.getElementById('stat-reviews');
-  const statVis = document.getElementById('stat-visits');
-  if (statFav) statFav.textContent = favCount;
-  if (statRev) statRev.textContent = reviewCount;
   if (statVis) statVis.textContent = visitCount;
+
+  // Review count: distinct shops the user has commented on (from the backend)
+  let reviewCount = 0;
+  if (isLoggedIn) {
+    try {
+      const res = await apiFetch('/api/restaurants/my-comments/');
+      if (res.ok) {
+        const comments = await res.json();
+        reviewCount = new Set(
+          comments.filter(c => c.shop).map(c => c.shop.hotpepper_id)
+        ).size;
+      }
+    } catch (e) { console.warn('Failed to load review count', e); }
+  }
+  if (statRev) statRev.textContent = reviewCount;
 }
 
 // ============================================================
 // Review History Page (only MY comments)
 // ============================================================
 
-function renderReviewHistory() {
+async function renderReviewHistory() {
   const container = document.getElementById('review-history-list');
   if (!container) return;
 
@@ -1520,22 +1784,21 @@ function renderReviewHistory() {
     return;
   }
 
-  const reviewedShops = [];
-  for (const shopId in allComments) {
-    const myComments = allComments[shopId].filter(c => c.authorEmail === currentUser.email);
-    if (myComments.length > 0) {
-      const shop = favorites.find(f => f.id === shopId) || (state.searchResults || []).find(s => s.id === shopId);
-      const ud = userShopData[shopId] || { rating: 0 };
-      reviewedShops.push({
-        id: shopId,
-        name: shop ? shop.name : shopId,
-        photo: shop ? shop.photo : '',
-        genre: shop ? shop.genre : '',
-        rating: ud.rating,
-        commentCount: myComments.length,
-      });
-    }
-  }
+  let comments = [];
+  try {
+    const res = await apiFetch('/api/restaurants/my-comments/');
+    if (res.ok) comments = await res.json();
+  } catch (e) { console.warn('Failed to load review history', e); }
+
+  // Group the user's comments by shop
+  const byShop = {};
+  comments.forEach(c => {
+    if (!c.shop) return;
+    const sid = c.shop.hotpepper_id;
+    if (!byShop[sid]) byShop[sid] = { shop: shopFromApi(c.shop), count: 0 };
+    byShop[sid].count++;
+  });
+  const reviewedShops = Object.values(byShop);
 
   if (reviewedShops.length === 0) {
     container.innerHTML = `
@@ -1547,23 +1810,25 @@ function renderReviewHistory() {
     return;
   }
 
-  container.innerHTML = reviewedShops.map(shop => {
-    const stars = '\u2605'.repeat(Math.round(shop.rating)) + '\u2606'.repeat(5 - Math.round(shop.rating));
+  container.innerHTML = reviewedShops.map(({ shop, count }) => {
     const imgUrl = shop.photo || 'https://via.placeholder.com/60x60.png?text=No+Image';
     return `
-      <div class="history-card glass-card-subtle" onclick="location.hash='#/detail/${shop.id}'">
-        <img src="${imgUrl}" alt="${shop.name}" class="history-card-img" />
+      <div class="history-card glass-card-subtle" data-shop-id="${escapeHtml(shop.id)}">
+        <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(shop.name)}" class="history-card-img" />
         <div class="history-card-body">
-          <h3 class="history-card-name">${shop.name}</h3>
+          <h3 class="history-card-name">${escapeHtml(shop.name)}</h3>
           <div class="history-card-meta">
-            <span class="history-stars">${stars}</span>
-            <span class="history-rating">${shop.rating > 0 ? shop.rating.toFixed(1) : '-'}</span>
+            ${shop.genre ? `<span class="meta-badge" style="font-size: 0.7rem;">${escapeHtml(shop.genre)}</span>` : ''}
           </div>
-          <span class="text-muted-sm">コメント ${shop.commentCount}件</span>
+          <span class="text-muted-sm">コメント ${count}件</span>
         </div>
         <span class="material-icons-round" style="color: var(--text-muted);">chevron_right</span>
       </div>`;
   }).join('');
+
+  container.querySelectorAll('.history-card').forEach(card => {
+    card.addEventListener('click', () => { location.hash = `#/detail/${card.dataset.shopId}`; });
+  });
 }
 
 // ============================================================
@@ -1590,15 +1855,8 @@ function renderVisitHistory() {
   const visitedShops = [];
   for (const shopId in userShopData) {
     const ud = userShopData[shopId];
-    if (ud.visitCount > 0) {
-      const shop = favorites.find(f => f.id === shopId) || (state.searchResults || []).find(s => s.id === shopId);
-      visitedShops.push({
-        id: shopId,
-        name: shop ? shop.name : shopId,
-        photo: shop ? shop.photo : '',
-        genre: shop ? shop.genre : '',
-        visitCount: ud.visitCount,
-      });
+    if (ud.visitCount > 0 && ud.shop) {
+      visitedShops.push({ ...ud.shop, visitCount: ud.visitCount });
     }
   }
 
@@ -1617,18 +1875,22 @@ function renderVisitHistory() {
   container.innerHTML = visitedShops.map(shop => {
     const imgUrl = shop.photo || 'https://via.placeholder.com/60x60.png?text=No+Image';
     return `
-      <div class="history-card glass-card-subtle" onclick="location.hash='#/detail/${shop.id}'">
-        <img src="${imgUrl}" alt="${shop.name}" class="history-card-img" />
+      <div class="history-card glass-card-subtle" data-shop-id="${escapeHtml(shop.id)}">
+        <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(shop.name)}" class="history-card-img" />
         <div class="history-card-body">
-          <h3 class="history-card-name">${shop.name}</h3>
+          <h3 class="history-card-name">${escapeHtml(shop.name)}</h3>
           <div class="history-card-meta">
             <span class="visit-badge">${shop.visitCount}回来店</span>
-            ${shop.genre ? `<span class="meta-badge" style="font-size: 0.7rem;">${shop.genre}</span>` : ''}
+            ${shop.genre ? `<span class="meta-badge" style="font-size: 0.7rem;">${escapeHtml(shop.genre)}</span>` : ''}
           </div>
         </div>
         <span class="material-icons-round" style="color: var(--text-muted);">chevron_right</span>
       </div>`;
   }).join('');
+
+  container.querySelectorAll('.history-card').forEach(card => {
+    card.addEventListener('click', () => { location.hash = `#/detail/${card.dataset.shopId}`; });
+  });
 }
 
 // ============================================================
@@ -1665,27 +1927,26 @@ function renderSearchHistory() {
     return;
   }
 
-  container.innerHTML = history.map(item => {
+  container.innerHTML = history.map((item, idx) => {
     const mode = item.mode === 'gps' ? '位置情報' : 'キーワード';
-    const queryText = item.mode === 'gps' 
+    const queryText = item.mode === 'gps'
       ? `緯度:${state.lat?.toFixed(4)}, 経度:${state.lng?.toFixed(4)}`
-      : `キーワード: ${item.keyword || 'なし'}`;
-    
+      : `キーワード: ${escapeHtml(item.keyword || 'なし')}`;
+
     const filters = [];
-    if (item.genre) filters.push(`ジャンル:${item.genre}`);
-    if (item.budget) filters.push(`予算:${item.budget}`);
-    
+    if (item.genre) filters.push(`ジャンル:${escapeHtml(item.genre)}`);
+    if (item.budget) filters.push(`予算:${escapeHtml(item.budget)}`);
+
     return `
-      <div class="history-card glass-card-subtle search-history-item" 
-           data-params='${JSON.stringify(item)}'>
+      <div class="history-card glass-card-subtle search-history-item" data-index="${idx}">
         <div class="history-card-body">
           <div class="search-history-header">
             <span class="search-mode-badge">${mode}</span>
-            <span class="search-date">${new Date(item.timestamp).toLocaleString('ja-JP')}</span>
+            <span class="search-date">${escapeHtml(new Date(item.timestamp).toLocaleString('ja-JP'))}</span>
           </div>
           <p class="search-query">${queryText}</p>
           ${filters.length > 0 ? `<div class="search-filters">${filters.map(f => `<span class="filter-tag">${f}</span>`).join('')}</div>` : ''}
-          <div class="search-result-count">結果: ${item.resultCount}件</div>
+          <div class="search-result-count">結果: ${escapeHtml(item.resultCount)}件</div>
         </div>
         <button class="btn-secondary search-again-btn" title="再検索">
           <span class="material-icons-round">search</span>
@@ -1698,7 +1959,8 @@ function renderSearchHistory() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const card = e.target.closest('.search-history-item');
-      const params = JSON.parse(card.dataset.params);
+      const params = history[parseInt(card.dataset.index, 10)];
+      if (!params) return;
       
       // 検索パラメータを復元して検索ページに遷移
       restoreSearchParams(params);
@@ -1744,16 +2006,12 @@ function restoreSearchParams(params) {
     }
   }
   
-  // 予算
+  // 予算（上限）
   if (params.budget) {
-    const budgetMaxSelect = document.getElementById('budget-max-select');
-    if (budgetMaxSelect) {
-      for (let option of budgetMaxSelect.options) {
-        if (option.text === params.budget) {
-          budgetMaxSelect.value = option.value;
-          break;
-        }
-      }
+    const budgetInput = document.getElementById('budget-max-input');
+    if (budgetInput) {
+      const m = String(params.budget).match(/(\d[\d,]*)/);
+      budgetInput.value = m ? m[1].replace(/,/g, '') : '';
     }
   }
 }

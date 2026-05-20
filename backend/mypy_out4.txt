@@ -1,8 +1,0 @@
-restaurants\views.py:292: error: Incompatible type for lookup 'user': (got "User | AnonymousUser", expected "User | int | None")  [misc]
-restaurants\views.py:309: error: Incompatible type for lookup 'user': (got "User | AnonymousUser", expected "User | int | None")  [misc]
-restaurants\views.py:323: error: Incompatible type for lookup 'user': (got "User | AnonymousUser", expected "User | int | None")  [misc]
-restaurants\views.py:402: error: Incompatible type for lookup 'user': (got "User | AnonymousUser", expected "User | int | None")  [misc]
-restaurants\views.py:427: error: Incompatible type for lookup 'user': (got "User | AnonymousUser", expected "User | int | None")  [misc]
-restaurants\views.py:433: error: Incompatible type for "user" of "SearchHistory" (got "User | AnonymousUser", expected "User | Combinable")  [misc]
-restaurants\views.py:439: error: Incompatible type for lookup 'user': (got "User | AnonymousUser", expected "User | int | None")  [misc]
-Found 7 errors in 1 file (checked 20 source files)

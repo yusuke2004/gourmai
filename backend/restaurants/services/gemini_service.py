@@ -5,7 +5,12 @@ from typing import Dict, Any, List, Optional
 import google.genai as genai
 from google.genai import types
 
+from utils.cache import cached
+
 logger = logging.getLogger(__name__)
+
+# 同一クエリは Gemini を叩かずキャッシュ (LLM コスト削減)
+_INTENT_CACHE_TTL = 60 * 60 * 6  # 6 時間
 
 def get_gemini_api_key() -> str:
     return os.environ.get("GEMINI_API_KEY", "")
@@ -19,41 +24,48 @@ def get_client():
 
 def parse_search_intent(query: str) -> Dict[str, Any]:
     """
-    ユーザーの自然言語入力から検索パラメータを抽出する
+    ユーザーの自然言語入力から検索パラメータを抽出する。
+    同一クエリは Gemini を叩かずキャッシュから返す。
     """
+    if not query:
+        return {}
+
     client = get_client()
     if not client:
         logger.warning("GEMINI_API_KEY is not set.")
         return {}
-    
-    prompt = f"""
-    ユーザーの飲食店検索クエリから以下の要素を抽出し、JSON形式で返してください。
-    
-    クエリ: "{query}"
-    
-    抽出項目:
-    - location: 地名、最寄り駅、ビル名など (例: "池袋")
-    - keyword: 具体的な料理名、特徴、こだわり条件 (例: "個室 焼き鳥")
-    - genre: 飲食店ジャンル (和食, 居酒屋, イタリアン, 焼肉, ... から選択)
-    - budget_min_yen: 予算の下限 (数値のみ, 例: 2000)
-    - budget_max_yen: 予算の上限 (数値のみ, 例: 4000)
-    - people: 人数 (数値のみ, 例: 4)
-    
-    不明な項目は null にしてください。
-    """
-    
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
+
+    def _call() -> Dict[str, Any]:
+        prompt = f"""
+        ユーザーの飲食店検索クエリから以下の要素を抽出し、JSON形式で返してください。
+
+        クエリ: "{query}"
+
+        抽出項目:
+        - location: 地名、最寄り駅、ビル名など (例: "池袋")
+        - keyword: 具体的な料理名、特徴、こだわり条件 (例: "個室 焼き鳥")
+        - genre: 飲食店ジャンル (和食, 居酒屋, イタリアン, 焼肉, ... から選択)
+        - budget_min_yen: 予算の下限 (数値のみ, 例: 2000)
+        - budget_max_yen: 予算の上限 (数値のみ, 例: 4000)
+        - people: 人数 (数値のみ, 例: 4)
+
+        不明な項目は null にしてください。
+        """
+
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                )
             )
-        )
-        return json.loads(response.text)
-    except Exception as e:
-        logger.error(f"Gemini intent parse error: {e}")
-        return {}
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"Gemini intent parse error: {e}")
+            return {}
+
+    return cached("gemini:intent", query.strip().lower(), _INTENT_CACHE_TTL, _call) or {}
 
 def generate_ai_recommendation(query: str, shops: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
